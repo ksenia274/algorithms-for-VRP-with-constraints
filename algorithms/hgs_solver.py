@@ -8,6 +8,7 @@ import pyvrp.stop
 
 from algorithms.fairness_metrics import FairnessReport, compute_fairness
 from algorithms.fairness_rebalancer import rebalance
+from data.load_solomon import load_instance
 
 
 class HGSSolver:
@@ -29,10 +30,8 @@ class HGSSolver:
         self.max_cost_increase_pct = max_cost_increase_pct
         self.rebalance_iterations = rebalance_iterations
 
-
-    def solve(self, instance_path: str) -> dict:
-    
-        model, data = self._build_model(instance_path)
+    def solve(self, instance_name: str) -> dict:
+        model, data = self._build_model(instance_name)
 
         result = model.solve(
             stop=pyvrp.stop.MaxRuntime(self.time_limit),
@@ -92,9 +91,8 @@ class HGSSolver:
             "cost_delta_pct": cost_delta,
         }
 
-
-    def _build_model(self, instance_path: str):
-        df = pd.read_csv(instance_path)
+    def _build_model(self, instance_name: str):
+        df = load_instance(instance_name)
         df.columns = df.columns.str.strip()
 
         m = pyvrp.Model()
@@ -163,7 +161,6 @@ class HGSSolver:
             loads.append(float(ld))
 
             clients_count.append(len(route))
-
             durations.append(float(d))
 
         return compute_fairness(

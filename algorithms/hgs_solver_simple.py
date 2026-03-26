@@ -4,6 +4,8 @@ import pandas as pd
 import pyvrp
 import pyvrp.stop
 
+from data.load_solomon import load_instance
+
 
 class HGSSolver:
     def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25):
@@ -12,8 +14,8 @@ class HGSSolver:
         self.vehicle_capacity = vehicle_capacity
         self.num_vehicles = num_vehicles
 
-    def solve(self, instance_path):
-        df = pd.read_csv(instance_path)
+    def solve(self, instance_name):
+        df = load_instance(instance_name)
         df.columns = df.columns.str.strip()
 
         m = pyvrp.Model()
@@ -38,16 +40,15 @@ class HGSSolver:
             m.add_client(
                 x=int(row["XCOORD."]),
                 y=int(row["YCOORD."]),
-                delivery=[int(row["DEMAND"])],        
+                delivery=[int(row["DEMAND"])],
                 tw_early=int(row["READY TIME"]),
                 tw_late=int(row["DUE DATE"]),
                 service_duration=int(row["SERVICE TIME"]),
                 name=f"Client {int(row['CUST NO.'])}",
             )
 
-        locations = m.locations  
-        for frm in locations:
-            for to in locations:
+        for frm in m.locations:
+            for to in m.locations:
                 dist = int(math.hypot(frm.x - to.x, frm.y - to.y))
                 m.add_edge(frm, to, distance=dist, duration=dist)
 
@@ -60,9 +61,7 @@ class HGSSolver:
 
         if best.is_feasible():
             total_distance = best.distance()
-            routes = []
-            for route in best.routes():
-                routes.append(route.visits())
+            routes = [route.visits() for route in best.routes()]
         else:
             total_distance = float("inf")
             routes = []

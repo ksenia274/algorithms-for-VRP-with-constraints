@@ -37,3 +37,7 @@ python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+### Datasets
+
+https://www.kaggle.com/datasets/masud7866/solomon-vrptw-benchmark

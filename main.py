@@ -10,6 +10,7 @@
 import argparse
 import os
 import time
+from enum import Enum
 
 from data.load_solomon import get_solomon_path, load_instance
 
@@ -31,8 +32,47 @@ def run_simple(args):
     for i, route in enumerate(sol["routes"]):
         print(f"  Route {i + 1}: {route}")
 
+def run_simple_rectangle_splitting(args):
+    from algorithms.rectangle_splitting import RSSolver, GenericSolution
+    from algorithms.hgs_solver_simple import HGSSolver
+    
+    print("Running Rectangle Splitting with Simple HGS...")
 
-def run_fairness(args):
+    hgs_simple = HGSSolver(
+        time_limit=max(1, int(args.time / 5)),
+        seed=args.seed,
+        vehicle_capacity=args.capacity,
+        num_vehicles=args.vehicles,
+    )
+
+    class DurationAdapter:
+        def __init__(self, base_solver: HGSSolver):
+            self.base_solver = base_solver
+            
+        def optimize(self, instance_path: str, max_obj2: float) -> GenericSolution:
+            self.base_solver.set_vehicle_capacity(int(max_obj2))
+            res = self.base_solver.solve(instance_path)
+            return GenericSolution(
+                obj1=res["total_distance"],
+                obj2=res["max_duration"] if res["feasible"] else max_obj2,
+                is_feasible=res["feasible"],
+                payload=res
+            )
+
+    rs_solver = RSSolver(DurationAdapter(hgs_simple), time_limit=args.time)
+    
+    sol = rs_solver.solve(args.instance, min_obj1=0, max_obj2=args.capacity)
+    
+    print(f"Feasible:       {sol['feasible']}")
+    print(f"Total distance: {sol['total_distance']}")
+    print(f"Max Duration:   {sol['max_duration']}")
+    print(f"Num routes:     {sol['num_routes']}")
+    print()
+    for i, route in enumerate(sol["routes"]):
+        print(f"  Route {i + 1}: {route}")
+
+
+def run_fairness_rebalance(args):
     from algorithms.hgs_solver import HGSSolver
 
     sol = HGSSolver(
@@ -179,6 +219,13 @@ def run_visualise(args):
     from visualization.fairness_charts import plot_all
     plot_all(csv_path=args.csv, output_dir=args.output)
 
+class Algorithm(Enum):
+    HGS_SIMPLE = 'hgs_simple'
+    HGS_REBALANCE = 'hgs_rebalance'
+    HGS_RECTANGLE_SPLITTING = 'hgs_rs'
+    
+    def __str__(self):
+        return self.value
 
 def main():
     parser = argparse.ArgumentParser(
@@ -205,7 +252,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--capacity", type=int, default=200)
     parser.add_argument("--vehicles", type=int, default=25)
-    parser.add_argument("--fairness", action="store_true")
+    parser.add_argument("--algorithm", type=Algorithm, choices=list(Algorithm))
     parser.add_argument("--max-cost-increase", type=float, default=5.0)
     parser.add_argument("--rebalance-iters", type=int, default=3000)
 
@@ -215,10 +262,14 @@ def main():
         run_benchmark(args)
     elif args.command == "visualise":
         run_visualise(args)
-    elif args.fairness:
-        run_fairness(args)
-    else:
+    elif args.algorithm == Algorithm.HGS_REBALANCE:
+        run_fairness_rebalance(args)
+    elif args.algorithm == Algorithm.HGS_RECTANGLE_SPLITTING:
+        run_simple_rectangle_splitting(args)
+    elif args.algorithm == Algorithm.HGS_SIMPLE:
         run_simple(args)
+    else:
+        raise Exception("Neither the algorithm nor the command was specified")
 
 
 if __name__ == "__main__":

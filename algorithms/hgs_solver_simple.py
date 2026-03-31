@@ -13,10 +13,22 @@ class HGSSolver:
         self.seed = seed
         self.vehicle_capacity = vehicle_capacity
         self.num_vehicles = num_vehicles
+        self._cache_instance_name = None
+        self._cache_df = None
+
+    def _get_df(self, instance_name: str) -> pd.DataFrame:
+        if self._cache_instance_name != instance_name:
+            df = load_instance(instance_name)
+            df.columns = df.columns.str.strip()
+            self._cache_df = df
+            self._cache_instance_name = instance_name
+        return self._cache_df
+    
+    def set_vehicle_capacity(self, vehicle_capacity: int):
+        self.vehicle_capacity = vehicle_capacity
 
     def solve(self, instance_name):
-        df = load_instance(instance_name)
-        df.columns = df.columns.str.strip()
+        df = self._get_df(instance_name)
 
         m = pyvrp.Model()
 
@@ -62,13 +74,16 @@ class HGSSolver:
         if best.is_feasible():
             total_distance = best.distance()
             routes = [route.visits() for route in best.routes()]
+            actual_max_duration = max([float(route.duration()) for route in best.routes()]) if routes else 0.0
         else:
             total_distance = float("inf")
             routes = []
+            actual_max_duration = float("inf")
 
         return {
             "routes": routes,
             "total_distance": total_distance,
             "num_routes": len(routes),
             "feasible": best.is_feasible(),
+            "max_duration": actual_max_duration,
         }

@@ -12,7 +12,7 @@ class SolverResult:
     total_distance: float
     num_routes: int
     feasible: bool
-    fairness: FairnessReport | None
+    fairness: FairnessReport
     metadata: dict[str, Any]
 
     @classmethod
@@ -22,7 +22,7 @@ class SolverResult:
             total_distance=float("inf"),
             num_routes=0,
             feasible=False,
-            fairness=None,
+            fairness=FairnessReport(),
             metadata=kwargs,
         )
 

@@ -1,6 +1,6 @@
 import math
 import time
-from typing import Protocol, Any
+from typing import Protocol
 from dataclasses import dataclass
 
 
@@ -37,15 +37,15 @@ class GenericSolution[T]:
     payload: T
 
 
-class ConstrainedSolver(Protocol):
-    def optimize(self, instance_path: str, max_obj2: float) -> GenericSolution:
+class ConstrainedSolver[T](Protocol):
+    def optimize(self, instance_path: str, max_obj2: float) -> GenericSolution[T]:
         """Minimizes obj1 subject to obj2 <= max_obj2"""
         ...
 
 class RSSolver[T]:
     def __init__(
         self,
-        solver: ConstrainedSolver,
+        solver: ConstrainedSolver[T],
         time_limit: int = 60,
     ):
         self.solver = solver
@@ -56,7 +56,7 @@ class RSSolver[T]:
         instance_path: str,
         min_obj1: float = 0,
         max_obj2: float = 10000,
-    ) -> T:
+    ) -> list[T]:
         start_time = time.perf_counter()
 
         optimization_result = self._optimize_with_constraint(
@@ -117,11 +117,11 @@ class RSSolver[T]:
                 ]
                 rectangles.difference_update(rectangles_to_remove)
 
-        return min(pareto_set, key=lambda result: result.point.y).payload
+        return list(map(lambda result: result.payload, pareto_set))
 
     def _optimize_with_constraint(
         self, instance_path, max_obj2
-    ) -> _OptimizationResult:
+    ) -> _OptimizationResult[T]:
         result = self.solver.optimize(instance_path, max_obj2=max_obj2)
         point = _Point(result.obj1, result.obj2)
         is_feasible = result.is_feasible

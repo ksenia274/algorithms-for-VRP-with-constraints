@@ -12,6 +12,7 @@ import os
 import time
 from enum import Enum
 
+from algorithms.solver_result import SolverResult
 from data.load_solomon import get_solomon_path
 
 
@@ -60,9 +61,10 @@ def run_simple_rectangle_splitting(args):
                 payload=res
             )
 
-    rs_solver = RSSolver(DurationAdapter(hgs_simple), time_limit=args.time)
+    rs_solver = RSSolver[SolverResult](DurationAdapter(hgs_simple), time_limit=args.time)
     
-    sol = rs_solver.solve(args.instance, min_obj1=0, max_obj2=args.capacity)
+    pareto_frontier = rs_solver.solve(args.instance, min_obj1=0, max_obj2=args.capacity)
+    sol = min(pareto_frontier, key=lambda s: s.fairness.fairness_score)
     
     print(f"Feasible:       {sol.feasible}")
     print(f"Total distance: {sol.total_distance}")
@@ -98,9 +100,16 @@ def run_fairness_rebalance(args):
         print(f"  Route {i + 1}: {route}")
 
     print("\n=== BEFORE rebalancing ===")
-    print(sol_before_rebalance.fairness.summary())
+    if sol_before_rebalance.feasible:
+        print(sol_before_rebalance.fairness.summary())
+    else:
+        print(f"Is Not Feasible")
+
     print("\n=== AFTER rebalancing ===")
-    print(sol.fairness.summary())
+    if sol.feasible:
+        print(sol.fairness.summary())
+    else:
+        print(f"Is Not Feasible")
 
 
 def _detect_category(name):

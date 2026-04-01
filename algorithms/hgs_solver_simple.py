@@ -4,6 +4,7 @@ import pandas as pd
 import pyvrp
 import pyvrp.stop
 
+from algorithms.fairness_metrics import compute_fairness_for_routes
 from data.load_solomon import load_instance
 
 
@@ -17,7 +18,7 @@ class HGSSolver:
         self._cache_df = None
 
     def _get_df(self, instance_name: str) -> pd.DataFrame:
-        if self._cache_instance_name != instance_name:
+        if self._cache_df is None or self._cache_instance_name != instance_name:
             df = load_instance(instance_name)
             df.columns = df.columns.str.strip()
             self._cache_df = df
@@ -75,10 +76,12 @@ class HGSSolver:
             total_distance = best.distance()
             routes = [route.visits() for route in best.routes()]
             actual_max_duration = max([float(route.duration()) for route in best.routes()]) if routes else 0.0
+            fairness = compute_fairness_for_routes(m.data(), routes)
         else:
             total_distance = float("inf")
             routes = []
             actual_max_duration = float("inf")
+            fairness = float("inf")
 
         return {
             "routes": routes,
@@ -86,4 +89,5 @@ class HGSSolver:
             "num_routes": len(routes),
             "feasible": best.is_feasible(),
             "max_duration": actual_max_duration,
+            "fairness": fairness,
         }

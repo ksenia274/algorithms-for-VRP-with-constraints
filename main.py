@@ -12,6 +12,7 @@ import os
 import time
 from enum import Enum
 
+from algorithms.fairness_metrics import compute_fairness_for_routes
 from data.load_solomon import get_solomon_path, load_instance
 
 
@@ -31,6 +32,7 @@ def run_simple(args):
     print()
     for i, route in enumerate(sol["routes"]):
         print(f"  Route {i + 1}: {route}")
+    print(sol["fairness"].summary())
 
 def run_simple_rectangle_splitting(args):
     from algorithms.rectangle_splitting import RSSolver, GenericSolution
@@ -70,6 +72,7 @@ def run_simple_rectangle_splitting(args):
     print()
     for i, route in enumerate(sol["routes"]):
         print(f"  Route {i + 1}: {route}")
+    print(sol["fairness"].summary())
 
 
 def run_fairness_rebalance(args):

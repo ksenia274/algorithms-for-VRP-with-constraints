@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import math
 
-import pandas as pd
 import pyvrp
 import pyvrp.stop
 
-from algorithms.fairness_metrics import FairnessReport, compute_fairness
+from algorithms.fairness_metrics import compute_fairness_for_routes
 from algorithms.fairness_rebalancer import rebalance
 from data.load_solomon import load_instance
 
@@ -54,7 +53,7 @@ class HGSSolver:
         raw_routes = [route.visits() for route in best.routes()]
         hgs_distance = best.distance()
 
-        fairness_before = self._compute_fairness_for_routes(data, raw_routes)
+        fairness_before = compute_fairness_for_routes(data, raw_routes)
 
         if self.enable_fairness and len(raw_routes) >= 2:
             rb = rebalance(
@@ -72,7 +71,7 @@ class HGSSolver:
             final_distance = float(hgs_distance)
             rebalance_moves = 0
 
-        fairness_after = self._compute_fairness_for_routes(data, final_routes)
+        fairness_after = compute_fairness_for_routes(data, final_routes)
 
         cost_delta = (
             (final_distance - hgs_distance) / hgs_distance * 100.0
@@ -130,42 +129,3 @@ class HGSSolver:
                 m.add_edge(frm, to, distance=dist, duration=dist)
 
         return m, m.data()
-
-    def _compute_fairness_for_routes(
-        self,
-        data,
-        routes: list[list[int]],
-    ) -> FairnessReport:
-        dm = data.distance_matrix(0)
-        depot = 0
-
-        distances = []
-        loads = []
-        clients_count = []
-        durations = []
-
-        for route in routes:
-            d = 0
-            prev = depot
-            for c in route:
-                d += dm[prev, c]
-                prev = c
-            d += dm[prev, depot]
-            distances.append(float(d))
-
-            ld = 0
-            for c in route:
-                loc = data.location(c)
-                if hasattr(loc, "delivery") and loc.delivery:
-                    ld += loc.delivery[0]
-            loads.append(float(ld))
-
-            clients_count.append(len(route))
-            durations.append(float(d))
-
-        return compute_fairness(
-            route_distances=distances,
-            route_loads=loads,
-            route_clients=clients_count,
-            route_durations=durations,
-        )

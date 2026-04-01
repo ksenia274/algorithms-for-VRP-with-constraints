@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from pyvrp import ProblemData
+
 
 @dataclass
 class FairnessReport:
@@ -169,3 +171,41 @@ def compute_fairness(
     )
 
     return report
+
+def compute_fairness_for_routes(
+        data: ProblemData,
+        routes: list[list[int]],
+    ) -> FairnessReport:
+        dm = data.distance_matrix(0)
+        depot = 0
+
+        distances = []
+        loads = []
+        clients_count = []
+        durations = []
+
+        for route in routes:
+            d = 0
+            prev = depot
+            for c in route:
+                d += dm[prev, c]
+                prev = c
+            d += dm[prev, depot]
+            distances.append(float(d))
+
+            ld = 0
+            for c in route:
+                loc = data.location(c)
+                if hasattr(loc, "delivery") and loc.delivery:
+                    ld += loc.delivery[0]
+            loads.append(float(ld))
+
+            clients_count.append(len(route))
+            durations.append(float(d))
+
+        return compute_fairness(
+            route_distances=distances,
+            route_loads=loads,
+            route_clients=clients_count,
+            route_durations=durations,
+        )

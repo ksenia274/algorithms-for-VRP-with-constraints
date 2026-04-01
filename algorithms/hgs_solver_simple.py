@@ -4,7 +4,7 @@ import pandas as pd
 import pyvrp
 import pyvrp.stop
 
-from algorithms.fairness_metrics import compute_fairness_for_routes
+from algorithms.solver_result import SolverResult
 from data.load_solomon import load_instance
 
 
@@ -28,7 +28,7 @@ class HGSSolver:
     def set_vehicle_capacity(self, vehicle_capacity: int):
         self.vehicle_capacity = vehicle_capacity
 
-    def solve(self, instance_name):
+    def solve(self, instance_name) -> SolverResult:
         df = self._get_df(instance_name)
 
         m = pyvrp.Model()
@@ -73,21 +73,8 @@ class HGSSolver:
         best = result.best
 
         if best.is_feasible():
-            total_distance = best.distance()
             routes = [route.visits() for route in best.routes()]
             actual_max_duration = max([float(route.duration()) for route in best.routes()]) if routes else 0.0
-            fairness = compute_fairness_for_routes(m.data(), routes)
+            return SolverResult.from_routes_pyvrp_adapter(routes, m.data(), max_duration=actual_max_duration)
         else:
-            total_distance = float("inf")
-            routes = []
-            actual_max_duration = float("inf")
-            fairness = float("inf")
-
-        return {
-            "routes": routes,
-            "total_distance": total_distance,
-            "num_routes": len(routes),
-            "feasible": best.is_feasible(),
-            "max_duration": actual_max_duration,
-            "fairness": fairness,
-        }
+            return SolverResult.infeasible()

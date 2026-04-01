@@ -23,18 +23,18 @@ class _Rectangle:
 
 
 @dataclass
-class _OptimizationResult:
+class _OptimizationResult[T]:
     point: _Point
     is_feasible: bool
-    payload: Any
+    payload: T
 
 
 @dataclass
-class GenericSolution:
+class GenericSolution[T]:
     obj1: float
     obj2: float
     is_feasible: bool
-    payload: Any
+    payload: T
 
 
 class ConstrainedSolver(Protocol):
@@ -42,7 +42,7 @@ class ConstrainedSolver(Protocol):
         """Minimizes obj1 subject to obj2 <= max_obj2"""
         ...
 
-class RSSolver:
+class RSSolver[T]:
     def __init__(
         self,
         solver: ConstrainedSolver,
@@ -56,7 +56,7 @@ class RSSolver:
         instance_path: str,
         min_obj1: float = 0,
         max_obj2: float = 10000,
-    ) -> dict:
+    ) -> T:
         start_time = time.perf_counter()
 
         optimization_result = self._optimize_with_constraint(
@@ -65,7 +65,7 @@ class RSSolver:
         x, is_feasible = optimization_result.point, optimization_result.is_feasible
 
         pareto_set = [optimization_result]
-        rectangles = set([_Rectangle(x, _Point(min_obj1, max_obj2))])
+        rectangles = {_Rectangle(x, _Point(min_obj1, max_obj2))}
         while time.perf_counter() - start_time < self.time_limit:
             max_rectangle = None
             max_area = -math.inf
@@ -112,10 +112,10 @@ class RSSolver:
                     rectangles.discard(r2)
                     rectangles.add(_Rectangle(_Point(max(x.x, r2.z1.x), x.y), r2.z2))
 
-                rectanges_to_remove = [
+                rectangles_to_remove = [
                     rect for rect in rectangles if x.dominates(rect.z1)
                 ]
-                rectangles.difference_update(rectanges_to_remove)
+                rectangles.difference_update(rectangles_to_remove)
 
         return min(pareto_set, key=lambda result: result.point.y).payload
 

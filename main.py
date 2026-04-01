@@ -12,8 +12,7 @@ import os
 import time
 from enum import Enum
 
-from algorithms.fairness_metrics import compute_fairness_for_routes
-from data.load_solomon import get_solomon_path, load_instance
+from data.load_solomon import get_solomon_path
 
 
 def run_simple(args):
@@ -26,13 +25,13 @@ def run_simple(args):
         num_vehicles=args.vehicles,
     ).solve(args.instance)
 
-    print(f"Feasible:       {sol['feasible']}")
-    print(f"Total distance: {sol['total_distance']}")
-    print(f"Num routes:     {sol['num_routes']}")
+    print(f"Feasible:       {sol.feasible}")
+    print(f"Total distance: {sol.total_distance}")
+    print(f"Num routes:     {sol.num_routes}")
     print()
-    for i, route in enumerate(sol["routes"]):
+    for i, route in enumerate(sol.routes):
         print(f"  Route {i + 1}: {route}")
-    print(sol["fairness"].summary())
+    print(sol.fairness.summary())
 
 def run_simple_rectangle_splitting(args):
     from algorithms.rectangle_splitting import RSSolver, GenericSolution
@@ -55,9 +54,9 @@ def run_simple_rectangle_splitting(args):
             self.base_solver.set_vehicle_capacity(int(max_obj2))
             res = self.base_solver.solve(instance_path)
             return GenericSolution(
-                obj1=res["total_distance"],
-                obj2=res["max_duration"] if res["feasible"] else max_obj2,
-                is_feasible=res["feasible"],
+                obj1=res.total_distance,
+                obj2=res.metadata["max_duration"] if res.feasible else max_obj2,
+                is_feasible=res.feasible,
                 payload=res
             )
 
@@ -65,20 +64,20 @@ def run_simple_rectangle_splitting(args):
     
     sol = rs_solver.solve(args.instance, min_obj1=0, max_obj2=args.capacity)
     
-    print(f"Feasible:       {sol['feasible']}")
-    print(f"Total distance: {sol['total_distance']}")
-    print(f"Max Duration:   {sol['max_duration']}")
-    print(f"Num routes:     {sol['num_routes']}")
+    print(f"Feasible:       {sol.feasible}")
+    print(f"Total distance: {sol.total_distance}")
+    print(f"Max Duration:   {sol.metadata["max_duration"]}")
+    print(f"Num routes:     {sol.num_routes}")
     print()
-    for i, route in enumerate(sol["routes"]):
+    for i, route in enumerate(sol.routes):
         print(f"  Route {i + 1}: {route}")
-    print(sol["fairness"].summary())
+    print(sol.fairness.summary())
 
 
 def run_fairness_rebalance(args):
     from algorithms.hgs_solver import HGSSolver
 
-    sol = HGSSolver(
+    sol_before_rebalance, sol = HGSSolver(
         time_limit=args.time,
         seed=args.seed,
         vehicle_capacity=args.capacity,
@@ -88,20 +87,20 @@ def run_fairness_rebalance(args):
         rebalance_iterations=args.rebalance_iters,
     ).solve(args.instance)
 
-    print(f"Feasible:        {sol['feasible']}")
-    print(f"Total distance:  {sol['total_distance']}")
-    print(f"Num routes:      {sol['num_routes']}")
-    print(f"Rebalance moves: {sol['rebalance_moves']}")
-    print(f"Cost delta:      {sol['cost_delta_pct']:+.2f}%")
+    print(f"Feasible:        {sol.feasible}")
+    print(f"Total distance:  {sol.total_distance}")
+    print(f"Num routes:      {sol.num_routes}")
+    print(f"Rebalance moves: {sol.metadata['rebalance_moves']}")
+    print(f"Cost delta:      {sol.metadata['cost_delta_pct']:+.2f}%")
     print()
 
-    for i, route in enumerate(sol["routes"]):
+    for i, route in enumerate(sol.routes):
         print(f"  Route {i + 1}: {route}")
 
     print("\n=== BEFORE rebalancing ===")
-    print(sol["fairness_before"].summary())
+    print(sol_before_rebalance.fairness.summary())
     print("\n=== AFTER rebalancing ===")
-    print(sol["fairness"].summary())
+    print(sol.fairness.summary())
 
 
 def _detect_category(name):
@@ -166,24 +165,24 @@ def run_benchmark(args):
 
         t0 = time.time()
         try:
-            sol = solver.solve(name)
+            sol_before_rebalance, sol = solver.solve(name)
         except Exception as exc:
             print(f"ERROR: {exc}")
             rows.append({"instance": name, "category": category, "error": str(exc)})
             continue
         elapsed = time.time() - t0
 
-        before = _extract_metrics(sol.get("fairness_before"))
-        after = _extract_metrics(sol.get("fairness"))
+        before = _extract_metrics(sol_before_rebalance.fairness)
+        after = _extract_metrics(sol.fairness)
 
         row = {
             "instance": name,
             "category": category,
-            "feasible": sol["feasible"],
-            "total_distance": sol["total_distance"],
-            "num_routes": sol["num_routes"],
-            "rebalance_moves": sol.get("rebalance_moves", 0),
-            "cost_delta_pct": sol.get("cost_delta_pct", 0.0),
+            "feasible": sol.feasible,
+            "total_distance": sol.total_distance,
+            "num_routes": sol.num_routes,
+            "rebalance_moves": sol.metadata.get("rebalance_moves", 0),
+            "cost_delta_pct": sol.metadata.get("cost_delta_pct", 0.0),
             "solve_time_s": round(elapsed, 2),
             **{f"{k}_before": v for k, v in before.items()},
             **{f"{k}_after": v for k, v in after.items()},
@@ -196,9 +195,9 @@ def run_benchmark(args):
         if gini_b is not None and gini_a is not None:
             gini_str = f" | Gini {gini_b:.3f} -> {gini_a:.3f} ({gini_a - gini_b:+.3f})"
 
-        status = "OK" if sol["feasible"] else "INFEASIBLE"
-        print(f"{status} | {elapsed:.1f}s | dist={sol['total_distance']}"
-              f" | moves={sol.get('rebalance_moves', 0)}{gini_str}")
+        status = "OK" if sol.feasible else "INFEASIBLE"
+        print(f"{status} | {elapsed:.1f}s | dist={sol.total_distance}"
+              f" | moves={sol.metadata.get('rebalance_moves', 0)}{gini_str}")
 
     os.makedirs(args.output, exist_ok=True)
     csv_path = os.path.join(args.output, "fairness_benchmark.csv")

@@ -152,23 +152,23 @@ def main():
         num_vehicles=args.vehicles,
         enable_fairness=not args.no_fairness,
     )
-    sol = solver.solve(inp)
+    _, sol = solver.solve(inp)
 
-    print(f"\nFeasible:        {sol['feasible']}")
-    print(f"Total distance:  {sol['total_distance']}")
-    print(f"Num routes:      {sol['num_routes']}")
-    print(f"Rebalance moves: {sol['rebalance_moves']}")
-    print(f"Cost delta:      {sol['cost_delta_pct']:+.2f}%")
-    if sol["fairness"]:
-        r = sol["fairness"]
+    print(f"\nFeasible:        {sol.feasible}")
+    print(f"Total distance:  {sol.total_distance}")
+    print(f"Num routes:      {sol.num_routes}")
+    print(f"Rebalance moves: {sol.metadata.get('rebalance_moves', 0)}")
+    print(f"Cost delta:      {sol.metadata.get('cost_delta_pct', 0.0):+.2f}%")
+    if sol.fairness:
+        r = sol.fairness
         print(f"Gini (after):    {r.dist_gini:.4f}")
         print(f"CV   (after):    {r.dist_cv:.4f}")
 
-    if not sol["feasible"]:
+    if not sol.feasible:
         print("\nWARNING: infeasible — try --vehicles or --time.")
 
     n_clients = len(inp.df) - 1
-    in_routes = set(c for r in sol["routes"] for c in r)
+    in_routes = set(c for r in sol.routes for c in r)
     missing = [i for i in range(1, n_clients + 1) if i not in in_routes]
     if missing:
         print(f"\nWARNING: {len(missing)} clients NOT in any route: {missing}")
@@ -185,7 +185,7 @@ def main():
 
     print("Drawing map...")
     plot_routes_on_map(
-        routes=sol["routes"],
+        routes=sol.routes,
         coordinates=inp.coordinates,
         output_path=args.output_map,
         center=BASE_COORDS,

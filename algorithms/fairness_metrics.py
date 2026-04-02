@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Sequence
 
 
 @dataclass
@@ -16,9 +17,9 @@ class FairnessReport:
     dist_range: float = 0.0
     dist_min: float = 0.0
     dist_max: float = 0.0
-    dist_cv: float = 0.0          
-    dist_jain: float = 0.0        
-    dist_gini: float = 0.0        
+    dist_cv: float = 0.0
+    dist_jain: float = 0.0
+    dist_gini: float = 0.0
 
     load_mean: float = 0.0
     load_std: float = 0.0
@@ -59,7 +60,6 @@ class FairnessReport:
         return "\n".join(lines)
 
 
-
 def _mean(vals: list[float]) -> float:
     return sum(vals) / len(vals) if vals else 0.0
 
@@ -72,16 +72,11 @@ def _std(vals: list[float]) -> float:
 
 
 def _cv(vals: list[float]) -> float:
-    """Coefficient of Variation: std / mean."""
     m = _mean(vals)
     return _std(vals) / m if m > 0 else 0.0
 
 
 def _jain(vals: list[float]) -> float:
-    """
-    Jain's Fairness Index:  (Σ xi)² / (n · Σ xi²)
-    Возвращает 1.0 при полном равенстве.
-    """
     n = len(vals)
     if n == 0:
         return 1.0
@@ -93,9 +88,6 @@ def _jain(vals: list[float]) -> float:
 
 
 def _gini(vals: list[float]) -> float:
-    """
-    Gini coefficient: 0 = полное равенство, 1 = полное неравенство.
-    """
     n = len(vals)
     if n < 2:
         return 0.0
@@ -109,7 +101,6 @@ def _gini(vals: list[float]) -> float:
         cum += v
         area += cum
     return 1.0 - (2.0 * area) / (n * total) + 1.0 / n
-
 
 
 def compute_fairness(
@@ -169,3 +160,30 @@ def compute_fairness(
     )
 
     return report
+
+
+def compute_fairness_for_routes(
+    routes: list[list[int]],
+    distance_matrix: Sequence[Sequence[float]],
+    loc_loads: Sequence[float],
+) -> FairnessReport:
+    depot = 0
+    distances, loads, clients_count, durations = [], [], [], []
+
+    for route in routes:
+        d, prev = 0, depot
+        for c in route:
+            d += distance_matrix[prev][c]
+            prev = c
+        d += distance_matrix[prev][depot]
+        distances.append(float(d))
+        loads.append(float(sum(loc_loads[c] for c in route)))
+        clients_count.append(len(route))
+        durations.append(float(d))
+
+    return compute_fairness(
+        route_distances=distances,
+        route_loads=loads,
+        route_clients=clients_count,
+        route_durations=durations,
+    )

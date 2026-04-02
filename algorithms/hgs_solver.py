@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import math
 
-import pandas as pd
 import pyvrp
 import pyvrp.stop
 
-from algorithms.fairness_metrics import FairnessReport, compute_fairness
 from algorithms.fairness_rebalancer import rebalance
-from data.load_solomon import load_instance
-from data.vrp_instance import VRPInstanceInput
+from algorithms.solver_result import SolverResult
+from data.vrp_instance import VRPInstanceInput, load_instance_input
 
 
 class HGSSolver:
@@ -31,31 +29,19 @@ class HGSSolver:
         self.max_cost_increase_pct = max_cost_increase_pct
         self.rebalance_iterations = rebalance_iterations
 
-    def solve(self, instance: str | VRPInstanceInput) -> dict:
+    def solve(self, instance: str | VRPInstanceInput) -> tuple[SolverResult, SolverResult]:
         model, data = self._build_model(instance)
 
-        result = model.solve(
-            stop=pyvrp.stop.MaxRuntime(self.time_limit),
-            seed=self.seed,
-        )
-
+        result = model.solve(stop=pyvrp.stop.MaxRuntime(self.time_limit), seed=self.seed)
         best = result.best
+
         if not best.is_feasible():
-            return {
-                "routes": [],
-                "total_distance": float("inf"),
-                "num_routes": 0,
-                "feasible": False,
-                "fairness": None,
-                "fairness_before": None,
-                "rebalance_moves": 0,
-                "cost_delta_pct": 0.0,
-            }
+            inf = SolverResult.infeasible(rebalance_moves=0, cost_delta_pct=0.0)
+            return inf, inf
 
         raw_routes = [route.visits() for route in best.routes()]
         hgs_distance = best.distance()
-
-        fairness_before = self._compute_fairness_for_routes(data, raw_routes)
+        before = SolverResult.from_routes_pyvrp_adapter(raw_routes, data)
 
         if self.enable_fairness and len(raw_routes) >= 2:
             rb = rebalance(
@@ -73,37 +59,21 @@ class HGSSolver:
             final_distance = float(hgs_distance)
             rebalance_moves = 0
 
-        fairness_after = self._compute_fairness_for_routes(data, final_routes)
-
         cost_delta = (
             (final_distance - hgs_distance) / hgs_distance * 100.0
             if hgs_distance > 0
             else 0.0
         )
 
-        return {
-            "routes": final_routes,
-            "total_distance": final_distance,
-            "num_routes": len(final_routes),
-            "feasible": True,
-            "fairness": fairness_after,
-            "fairness_before": fairness_before,
-            "rebalance_moves": rebalance_moves,
-            "cost_delta_pct": cost_delta,
-        }
-
-    def _load_instance_input(self, instance: str | VRPInstanceInput) -> VRPInstanceInput:
-        if isinstance(instance, VRPInstanceInput):
-            return instance
-        if instance.endswith(".json"):
-            from data.load_yandex_instance import load_yandex_instance
-            return load_yandex_instance(instance)
-        if instance.endswith(".csv") or ("/" in instance) or ("\\" in instance):
-            return VRPInstanceInput(df=pd.read_csv(instance))
-        return VRPInstanceInput(df=load_instance(instance))
+        after = SolverResult.from_routes_pyvrp_adapter(
+            final_routes, data,
+            rebalance_moves=rebalance_moves,
+            cost_delta_pct=cost_delta,
+        )
+        return before, after
 
     def _build_model(self, instance: str | VRPInstanceInput):
-        inp = self._load_instance_input(instance)
+        inp = load_instance_input(instance)
         df = inp.df.copy()
         df.columns = df.columns.str.strip()
 
@@ -117,7 +87,6 @@ class HGSSolver:
             tw_late=int(depot_row["DUE DATE"]),
             name="Depot",
         )
-
         m.add_vehicle_type(
             num_available=self.num_vehicles,
             capacity=[self.vehicle_capacity],
@@ -139,50 +108,12 @@ class HGSSolver:
         locs = list(m.locations)
         for i, frm in enumerate(locs):
             for j, to in enumerate(locs):
-                if inp.dist_matrix is not None:
-                    dist = int(inp.dist_matrix[i][j])
-                else:
-                    dist = int(math.hypot(frm.x - to.x, frm.y - to.y))
+                dist = (
+                    int(inp.dist_matrix[i][j])
+                    if inp.dist_matrix is not None
+                    else int(math.hypot(frm.x - to.x, frm.y - to.y))
+                )
                 duration = int(inp.time_matrix[i][j]) if inp.time_matrix is not None else dist
                 m.add_edge(frm, to, distance=dist, duration=duration)
 
         return m, m.data()
-
-    def _compute_fairness_for_routes(
-        self,
-        data,
-        routes: list[list[int]],
-    ) -> FairnessReport:
-        dm = data.distance_matrix(0)
-        depot = 0
-
-        distances = []
-        loads = []
-        clients_count = []
-        durations = []
-
-        for route in routes:
-            d = 0
-            prev = depot
-            for c in route:
-                d += dm[prev, c]
-                prev = c
-            d += dm[prev, depot]
-            distances.append(float(d))
-
-            ld = 0
-            for c in route:
-                loc = data.location(c)
-                if hasattr(loc, "delivery") and loc.delivery:
-                    ld += loc.delivery[0]
-            loads.append(float(ld))
-
-            clients_count.append(len(route))
-            durations.append(float(d))
-
-        return compute_fairness(
-            route_distances=distances,
-            route_loads=loads,
-            route_clients=clients_count,
-            route_durations=durations,
-        )

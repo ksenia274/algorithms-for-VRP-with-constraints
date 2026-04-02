@@ -45,8 +45,8 @@ def run_benchmark(args):
     from algorithms.hgs_solver import HGSSolver
     from algorithms.alns_solver import ALNSSolver
 
-    use_alns = getattr(args, "alns", False)
-    use_fairness = getattr(args, "fairness", False)
+    from main import Algorithm
+    algorithm = getattr(args, "algorithm", Algorithm.HGS_REBALANCE)
     dataset = getattr(args, "dataset", "solomon")
 
     if dataset == "yandex":
@@ -89,13 +89,13 @@ def run_benchmark(args):
 
         print(f"\n[{category}] {name} ... ", end="", flush=True)
 
-        if use_alns:
+        if algorithm == Algorithm.ALNS:
             solver = ALNSSolver(
                 time_limit=args.time,
                 seed=args.seed,
                 vehicle_capacity=capacity,
                 num_vehicles=args.vehicles,
-                enable_fairness=use_fairness,
+                enable_fairness=True,
                 fairness_weight=getattr(args, "fairness_weight", 100.0),
                 max_iterations=getattr(args, "alns_iterations", 25000),
             )
@@ -105,31 +105,36 @@ def run_benchmark(args):
                 seed=args.seed,
                 vehicle_capacity=capacity,
                 num_vehicles=args.vehicles,
-                enable_fairness=use_fairness,
+                enable_fairness=(algorithm == Algorithm.HGS_REBALANCE),
                 max_cost_increase_pct=args.max_cost_increase,
                 rebalance_iterations=args.rebalance_iters,
             )
 
         t0 = time.time()
         try:
-            sol = solver.solve(instance_arg)
+            result = solver.solve(instance_arg)
         except Exception as exc:
             print(f"ERROR: {exc}")
             rows.append({"instance": name, "category": category, "error": str(exc)})
             continue
         elapsed = time.time() - t0
 
-        before = _extract_metrics(sol.get("fairness_before"))
-        after = _extract_metrics(sol.get("fairness"))
+        if isinstance(result, tuple):
+            sol_before, sol = result
+        else:
+            sol_before, sol = None, result
+
+        before = _extract_metrics(sol_before.fairness if sol_before is not None else None)
+        after = _extract_metrics(sol.fairness)
 
         row = {
             "instance": name,
             "category": category,
-            "feasible": sol["feasible"],
-            "total_distance": sol["total_distance"],
-            "num_routes": sol["num_routes"],
-            "rebalance_moves": sol.get("rebalance_moves", 0),
-            "cost_delta_pct": sol.get("cost_delta_pct", 0.0),
+            "feasible": sol.feasible,
+            "total_distance": sol.total_distance,
+            "num_routes": sol.num_routes,
+            "rebalance_moves": sol.metadata.get("rebalance_moves", 0),
+            "cost_delta_pct": sol.metadata.get("cost_delta_pct", 0.0),
             "solve_time_s": round(elapsed, 2),
             **{f"{k}_before": v for k, v in before.items()},
             **{f"{k}_after": v for k, v in after.items()},
@@ -142,9 +147,9 @@ def run_benchmark(args):
         if gini_b is not None and gini_a is not None:
             gini_str = f" | Gini {gini_b:.3f} -> {gini_a:.3f} ({gini_a - gini_b:+.3f})"
 
-        status = "OK" if sol["feasible"] else "INFEASIBLE"
-        print(f"{status} | {elapsed:.1f}s | dist={sol['total_distance']}"
-              f" | moves={sol.get('rebalance_moves', 0)}{gini_str}")
+        status = "OK" if sol.feasible else "INFEASIBLE"
+        print(f"{status} | {elapsed:.1f}s | dist={sol.total_distance}"
+              f" | moves={sol.metadata.get('rebalance_moves', 0)}{gini_str}")
 
     os.makedirs(args.output, exist_ok=True)
     csv_path = os.path.join(args.output, "fairness_benchmark.csv")

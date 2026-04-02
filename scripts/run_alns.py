@@ -6,18 +6,18 @@ def run_alns(args):
         seed=args.seed,
         vehicle_capacity=args.capacity,
         num_vehicles=args.vehicles,
-        enable_fairness=args.fairness,
+        enable_fairness=True,
         fairness_weight=args.fairness_weight,
         max_iterations=args.alns_iterations,
     ).solve(args.instance)
 
-    print(f"Feasible:       {sol['feasible']}")
-    print(f"Total distance: {sol['total_distance']}")
-    print(f"Num routes:     {sol['num_routes']}")
+    print(f"Feasible:       {sol.feasible}")
+    print(f"Total distance: {sol.total_distance}")
+    print(f"Num routes:     {sol.num_routes}")
     print()
-    for i, route in enumerate(sol["routes"]):
+    for i, route in enumerate(sol.routes):
         print(f"  Route {i + 1}: {route}")
 
-    if sol["fairness"]:
+    if sol.fairness:
         print("\n=== Fairness ===")
-        print(sol["fairness"].summary())
+        print(sol.fairness.summary())

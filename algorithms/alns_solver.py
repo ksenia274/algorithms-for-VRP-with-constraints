@@ -1,72 +1,49 @@
 import math
+from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
 from alns import ALNS
 from alns.accept import SimulatedAnnealing
 from alns.select import RouletteWheel
 from alns.State import State
 from alns.stop import MaxRuntime
 
-from algorithms.fairness_metrics import FairnessReport, compute_fairness
-from data.load_solomon import load_instance
-from data.vrp_instance import VRPInstanceInput
+from algorithms.solver_result import SolverResult
+from data.vrp_instance import VRPInstanceInput, load_instance_input
 
 
 UNASSIGNED_PENALTY = 1_000_000
 
 
+@dataclass
 class InstanceData:
-
-    def __init__(self, n_clients, coords, demands, tw_early, tw_late,
-                 service_time, capacity, num_vehicles, dist_matrix,
-                 time_matrix=None,
-                 enable_fairness=False, fairness_weight=0.0):
-        self.n_clients = n_clients
-        self.coords = coords
-        self.demands = demands
-        self.tw_early = tw_early
-        self.tw_late = tw_late
-        self.service_time = service_time
-        self.capacity = capacity
-        self.num_vehicles = num_vehicles
-        self.dm = dist_matrix           # used for cost (objective)
-        self.tm = time_matrix if time_matrix is not None else dist_matrix  # used for TW checks
-        self.enable_fairness = enable_fairness
-        self.fairness_weight = fairness_weight
+    n_clients: int
+    coords: list[tuple[int, int]]
+    demands: list[int]
+    tw_early: list[int]
+    tw_late: list[int]
+    service_time: list[int]
+    capacity: int
+    num_vehicles: int
+    dm: list[list[int]]
+    tm: list[list[int]]
+    enable_fairness: bool = False
+    fairness_weight: float = 0.0
 
 
-def _parse_instance(instance, capacity, num_vehicles,
-                    enable_fairness, fairness_weight):
-    if isinstance(instance, VRPInstanceInput):
-        inp = instance
-        df = inp.df.copy()
-        df.columns = df.columns.str.strip()
-    elif isinstance(instance, str) and instance.endswith(".json"):
-        from data.load_yandex_instance import load_yandex_instance
-        inp = load_yandex_instance(instance)
+def _parse_instance(instance, capacity, num_vehicles, enable_fairness, fairness_weight):
+    inp = load_instance_input(instance)
+    if isinstance(instance, str) and instance.endswith(".json"):
         if capacity == 200 and inp.recommended_capacity is not None:
             capacity = inp.recommended_capacity
-        df = inp.df.copy()
-        df.columns = df.columns.str.strip()
-    elif instance.endswith(".csv") or ("/" in instance) or ("\\" in instance):
-        df = pd.read_csv(instance)
-        df.columns = df.columns.str.strip()
-        inp = VRPInstanceInput(df=df)
-    else:
-        df = load_instance(instance)
-        df.columns = df.columns.str.strip()
-        inp = VRPInstanceInput(df=df)
+
+    df = inp.df.copy()
+    df.columns = df.columns.str.strip()
 
     n = len(df) - 1
-    # ensure enough vehicles so every client can be assigned
     num_vehicles = max(num_vehicles, math.ceil(n / max(capacity, 1)))
-    coords = []
-    demands = []
-    tw_early = []
-    tw_late = []
-    service_time = []
 
+    coords, demands, tw_early, tw_late, service_time = [], [], [], [], []
     for _, row in df.iterrows():
         coords.append((int(row["XCOORD."]), int(row["YCOORD."])))
         demands.append(int(row["DEMAND"]))
@@ -76,8 +53,7 @@ def _parse_instance(instance, capacity, num_vehicles,
 
     size = n + 1
     if inp.dist_matrix is not None:
-        dm = [[int(inp.dist_matrix[i][j]) for j in range(size)]
-              for i in range(size)]
+        dm = [[int(inp.dist_matrix[i][j]) for j in range(size)] for i in range(size)]
     else:
         dm = [[0] * size for _ in range(size)]
         for i in range(size):
@@ -92,21 +68,27 @@ def _parse_instance(instance, capacity, num_vehicles,
     if inp.time_matrix is not None:
         raw_tm = inp.time_matrix
         if isinstance(raw_tm[0][0], list):
-            # 3D time-dependent: average over periods
             n_periods = len(raw_tm)
-            tm = [[int(sum(raw_tm[p][i][j] for p in range(n_periods)) / n_periods)
-                   for j in range(size)]
-                  for i in range(size)]
+            tm = [
+                [int(sum(raw_tm[p][i][j] for p in range(n_periods)) / n_periods) for j in range(size)]
+                for i in range(size)
+            ]
         else:
-            tm = [[int(raw_tm[i][j]) for j in range(size)]
-                  for i in range(size)]
+            tm = [[int(raw_tm[i][j]) for j in range(size)] for i in range(size)]
 
     return InstanceData(
-        n_clients=n, coords=coords, demands=demands,
-        tw_early=tw_early, tw_late=tw_late, service_time=service_time,
-        capacity=capacity, num_vehicles=num_vehicles, dist_matrix=dm,
-        time_matrix=tm,
-        enable_fairness=enable_fairness, fairness_weight=fairness_weight,
+        n_clients=n,
+        coords=coords,
+        demands=demands,
+        tw_early=tw_early,
+        tw_late=tw_late,
+        service_time=service_time,
+        capacity=capacity,
+        num_vehicles=num_vehicles,
+        dm=dm,
+        tm=tm if tm is not None else dm,
+        enable_fairness=enable_fairness,
+        fairness_weight=fairness_weight,
     )
 
 
@@ -117,11 +99,7 @@ class VRPState(State):
         self.data = data
 
     def copy(self):
-        return VRPState(
-            [list(r) for r in self.routes],
-            list(self.unassigned),
-            self.data,
-        )
+        return VRPState([list(r) for r in self.routes], list(self.unassigned), self.data)
 
     def objective(self):
         total = self._total_distance()
@@ -157,8 +135,7 @@ class VRPState(State):
         for route in self.routes:
             if not route:
                 continue
-            d = 0
-            prev = 0
+            d, prev = 0, 0
             for c in route:
                 d += dm[prev][c]
                 prev = c
@@ -167,12 +144,10 @@ class VRPState(State):
         return result
 
 
-
 def _compute_departures(route, data):
-    tm = data.tm  # travel-time matrix for TW feasibility
+    tm = data.tm
+    time, prev = data.tw_early[0], 0
     deps = []
-    time = data.tw_early[0]
-    prev = 0
     for c in route:
         arrival = time + tm[prev][c]
         if arrival > data.tw_late[c]:
@@ -184,35 +159,29 @@ def _compute_departures(route, data):
 
 
 def _can_insert_at(route, pos, client, data, deps):
-    tm = data.tm  # travel-time matrix for TW feasibility
-    tw_late = data.tw_late
-    tw_early = data.tw_early
-    svc = data.service_time
-
+    tm = data.tm
     prev = 0 if pos == 0 else route[pos - 1]
     prev_dep = data.tw_early[0] if pos == 0 else deps[pos - 1]
 
     arr = prev_dep + tm[prev][client]
-    if arr > tw_late[client]:
+    if arr > data.tw_late[client]:
         return False
-    time = (arr if arr >= tw_early[client] else tw_early[client]) + svc[client]
+    time = max(arr, data.tw_early[client]) + data.service_time[client]
 
     prev_node = client
     for i in range(pos, len(route)):
         c = route[i]
         arr = time + tm[prev_node][c]
-        if arr > tw_late[c]:
+        if arr > data.tw_late[c]:
             return False
-        new_dep = (arr if arr >= tw_early[c] else tw_early[c]) + svc[c]
+        new_dep = max(arr, data.tw_early[c]) + data.service_time[c]
         if new_dep <= deps[i]:
             return True
         time = new_dep
         prev_node = c
 
     last = client if pos == len(route) else route[-1]
-    if time + tm[last][0] > tw_late[0]:
-        return False
-    return True
+    return time + tm[last][0] <= data.tw_late[0]
 
 
 def _best_insertion(route, client, data, load=None, deps=None):
@@ -229,8 +198,7 @@ def _best_insertion(route, client, data, load=None, deps=None):
         deps = []
 
     dm = data.dm
-    best_pos = None
-    best_cost = float("inf")
+    best_pos, best_cost = None, float("inf")
 
     for pos in range(len(route) + 1):
         if not _can_insert_at(route, pos, client, data, deps):
@@ -246,24 +214,16 @@ def _best_insertion(route, client, data, load=None, deps=None):
 
 
 def _build_initial_solution(data):
-    clients = list(range(1, data.n_clients + 1))
-    clients.sort(key=lambda c: data.tw_early[c])
+    clients = sorted(range(1, data.n_clients + 1), key=lambda c: data.tw_early[c])
 
-    routes = []
-    route_loads = []
-    route_deps = []
+    routes, route_loads, route_deps = [], [], []
     unassigned = []
 
     for client in clients:
-        best_r = None
-        best_pos = None
-        best_cost = float("inf")
+        best_r, best_pos, best_cost = None, None, float("inf")
 
         for ri, route in enumerate(routes):
-            result = _best_insertion(
-                route, client, data,
-                load=route_loads[ri], deps=route_deps[ri],
-            )
+            result = _best_insertion(route, client, data, load=route_loads[ri], deps=route_deps[ri])
             if result is not None:
                 pos, cost = result
                 if cost < best_cost:
@@ -301,10 +261,8 @@ def random_removal(state, rng):
     if not all_clients:
         return state
     n_remove = min(n_remove, len(all_clients))
-    indices = rng.choice(len(all_clients), size=n_remove, replace=False)
-    to_remove = set(all_clients[i] for i in indices)
-    state.routes = [[c for c in r if c not in to_remove] for r in state.routes]
-    state.routes = [r for r in state.routes if r]
+    to_remove = set(all_clients[i] for i in rng.choice(len(all_clients), size=n_remove, replace=False))
+    state.routes = [r for r in ([c for c in r if c not in to_remove] for r in state.routes) if r]
     state.unassigned.extend(to_remove)
     return state
 
@@ -318,16 +276,14 @@ def worst_removal(state, rng):
         for i, client in enumerate(route):
             prev = 0 if i == 0 else route[i - 1]
             nxt = 0 if i == len(route) - 1 else route[i + 1]
-            savings.append((dm[prev][client] + dm[client][nxt] - dm[prev][nxt],
-                            client))
+            savings.append((dm[prev][client] + dm[client][nxt] - dm[prev][nxt], client))
     savings.sort(reverse=True)
     to_remove = set()
     for _, client in savings:
         if len(to_remove) >= n_remove:
             break
         to_remove.add(client)
-    state.routes = [[c for c in r if c not in to_remove] for r in state.routes]
-    state.routes = [r for r in state.routes if r]
+    state.routes = [r for r in ([c for c in r if c not in to_remove] for r in state.routes) if r]
     state.unassigned.extend(to_remove)
     return state
 
@@ -343,20 +299,22 @@ def shaw_removal(state, rng):
         return state
 
     seed_client = all_clients[int(rng.integers(0, len(all_clients)))]
-
     max_dist = max(dm[seed_client]) or 1
     max_demand = max(data.demands) or 1
     tw_range = max(1, max(data.tw_late) - min(data.tw_early))
 
-    relatedness = []
-    for c in all_clients:
-        if c == seed_client:
-            continue
-        r = (dm[seed_client][c] / max_dist
-             + abs(data.tw_early[c] - data.tw_early[seed_client]) / tw_range
-             + abs(data.demands[c] - data.demands[seed_client]) / max_demand)
-        relatedness.append((r, c))
-    relatedness.sort()
+    relatedness = sorted(
+        (
+            (
+                dm[seed_client][c] / max_dist
+                + abs(data.tw_early[c] - data.tw_early[seed_client]) / tw_range
+                + abs(data.demands[c] - data.demands[seed_client]) / max_demand,
+                c,
+            )
+            for c in all_clients
+            if c != seed_client
+        )
+    )
 
     to_remove = {seed_client}
     for _, client in relatedness:
@@ -364,8 +322,7 @@ def shaw_removal(state, rng):
             break
         to_remove.add(client)
 
-    state.routes = [[c for c in r if c not in to_remove] for r in state.routes]
-    state.routes = [r for r in state.routes if r]
+    state.routes = [r for r in ([c for c in r if c not in to_remove] for r in state.routes) if r]
     state.unassigned.extend(to_remove)
     return state
 
@@ -373,22 +330,17 @@ def shaw_removal(state, rng):
 def greedy_repair(state, rng):
     state = state.copy()
     data = state.data
-    order = list(range(len(state.unassigned)))
-    rng.shuffle(order)
-    shuffled = [state.unassigned[i] for i in order]
+    shuffled = [state.unassigned[i] for i in rng.permutation(len(state.unassigned))]
 
     loads = [sum(data.demands[c] for c in r) for r in state.routes]
     deps = [_compute_departures(r, data) for r in state.routes]
 
     still_unassigned = []
     for client in shuffled:
-        best_r = None
-        best_pos = None
-        best_cost = float("inf")
+        best_r, best_pos, best_cost = None, None, float("inf")
 
         for ri, route in enumerate(state.routes):
-            result = _best_insertion(route, client, data,
-                                    load=loads[ri], deps=deps[ri])
+            result = _best_insertion(route, client, data, load=loads[ri], deps=deps[ri])
             if result is not None:
                 pos, cost = result
                 if cost < best_cost:
@@ -419,16 +371,13 @@ def regret_2_repair(state, rng):
     deps = [_compute_departures(r, data) for r in state.routes]
 
     while state.unassigned:
-        best_client = None
-        best_route_idx = None
-        best_pos = None
+        best_client, best_route_idx, best_pos = None, None, None
         max_regret = -float("inf")
 
         for client in state.unassigned:
             insertions = []
             for ri, route in enumerate(state.routes):
-                result = _best_insertion(route, client, data,
-                                        load=loads[ri], deps=deps[ri])
+                result = _best_insertion(route, client, data, load=loads[ri], deps=deps[ri])
                 if result is not None:
                     pos, cost = result
                     insertions.append((cost, ri, pos))
@@ -440,8 +389,7 @@ def regret_2_repair(state, rng):
                 continue
 
             insertions.sort()
-            regret = (UNASSIGNED_PENALTY if len(insertions) == 1
-                      else insertions[1][0] - insertions[0][0])
+            regret = UNASSIGNED_PENALTY if len(insertions) == 1 else insertions[1][0] - insertions[0][0]
 
             if regret > max_regret:
                 max_regret = regret
@@ -459,8 +407,7 @@ def regret_2_repair(state, rng):
         else:
             state.routes[best_route_idx].insert(best_pos, best_client)
             loads[best_route_idx] += data.demands[best_client]
-            deps[best_route_idx] = _compute_departures(
-                state.routes[best_route_idx], data)
+            deps[best_route_idx] = _compute_departures(state.routes[best_route_idx], data)
 
     return state
 
@@ -488,7 +435,7 @@ class ALNSSolver:
         self.sa_start_temp = sa_start_temp
         self.sa_end_temp = sa_end_temp
 
-    def solve(self, instance_name: str | VRPInstanceInput) -> dict:
+    def solve(self, instance_name: str | VRPInstanceInput) -> SolverResult:
         data = _parse_instance(
             instance_name,
             self.vehicle_capacity,
@@ -499,75 +446,34 @@ class ALNSSolver:
 
         initial = _build_initial_solution(data)
 
-    
         init_obj = initial._total_distance() or 1.0
-        scale = init_obj / 10_000.0 
+        scale = init_obj / 10_000.0
         start_temp = max(self.sa_start_temp, self.sa_start_temp * scale)
         end_temp = max(self.sa_end_temp, self.sa_end_temp * scale)
+        sa_step = (end_temp / start_temp) ** (1.0 / self.max_iterations)
 
         rng = np.random.default_rng(self.seed)
         alns = ALNS(rng)
-
         alns.add_destroy_operator(random_removal, name="random_removal")
         alns.add_destroy_operator(worst_removal, name="worst_removal")
         alns.add_destroy_operator(shaw_removal, name="shaw_removal")
         alns.add_repair_operator(greedy_repair, name="greedy_repair")
         alns.add_repair_operator(regret_2_repair, name="regret_2_repair")
 
-        sa_step = (end_temp / start_temp) ** (1.0 / self.max_iterations)
-
-        select = RouletteWheel(
-            scores=[5, 2, 1, 0.5],
-            decay=0.8,
-            num_destroy=3,
-            num_repair=2,
+        result = alns.iterate(
+            initial,
+            RouletteWheel(scores=[5, 2, 1, 0.5], decay=0.8, num_destroy=3, num_repair=2),
+            SimulatedAnnealing(start_temperature=start_temp, end_temperature=end_temp, step=sa_step),
+            MaxRuntime(self.time_limit),
         )
 
-        accept = SimulatedAnnealing(
-            start_temperature=start_temp,
-            end_temperature=end_temp,
-            step=sa_step,
-        )
-
-        stop = MaxRuntime(self.time_limit)
-
-        result = alns.iterate(initial, select, accept, stop)
         best = result.best_state
+        if best.unassigned:
+            return SolverResult.infeasible()
 
-        is_feasible = len(best.unassigned) == 0
-        total_dist = best._total_distance() if is_feasible else float("inf")
-        fairness = self._fairness_report(best) if is_feasible else None
-
-        return {
-            "routes": [list(r) for r in best.routes],
-            "total_distance": total_dist,
-            "num_routes": len(best.routes),
-            "feasible": is_feasible,
-            "fairness": fairness,
-            "fairness_before": None,
-            "rebalance_moves": 0,
-            "cost_delta_pct": 0.0,
-        }
-
-    def _fairness_report(self, state: VRPState) -> FairnessReport:
-        data = state.data
-        dm = data.dm
-        distances, loads, counts = [], [], []
-
-        for route in state.routes:
-            d = 0
-            prev = 0
-            for c in route:
-                d += dm[prev][c]
-                prev = c
-            d += dm[prev][0]
-            distances.append(float(d))
-            loads.append(float(sum(data.demands[c] for c in route)))
-            counts.append(len(route))
-
-        return compute_fairness(
-            route_distances=distances,
-            route_loads=loads,
-            route_clients=counts,
-            route_durations=distances,
+        routes = [list(r) for r in best.routes]
+        return SolverResult.from_routes(
+            routes=routes,
+            distance_matrix=data.dm,
+            loc_loads=data.demands,
         )

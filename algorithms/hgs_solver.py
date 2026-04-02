@@ -9,6 +9,7 @@ import pyvrp.stop
 from algorithms.fairness_metrics import FairnessReport, compute_fairness
 from algorithms.fairness_rebalancer import rebalance
 from data.load_solomon import load_instance
+from data.vrp_instance import VRPInstanceInput
 
 
 class HGSSolver:
@@ -30,8 +31,8 @@ class HGSSolver:
         self.max_cost_increase_pct = max_cost_increase_pct
         self.rebalance_iterations = rebalance_iterations
 
-    def solve(self, instance_name: str) -> dict:
-        model, data = self._build_model(instance_name)
+    def solve(self, instance: str | VRPInstanceInput) -> dict:
+        model, data = self._build_model(instance)
 
         result = model.solve(
             stop=pyvrp.stop.MaxRuntime(self.time_limit),
@@ -91,8 +92,19 @@ class HGSSolver:
             "cost_delta_pct": cost_delta,
         }
 
-    def _build_model(self, instance_name: str):
-        df = load_instance(instance_name)
+    def _load_instance_input(self, instance: str | VRPInstanceInput) -> VRPInstanceInput:
+        if isinstance(instance, VRPInstanceInput):
+            return instance
+        if instance.endswith(".json"):
+            from data.load_yandex_instance import load_yandex_instance
+            return load_yandex_instance(instance)
+        if instance.endswith(".csv") or ("/" in instance) or ("\\" in instance):
+            return VRPInstanceInput(df=pd.read_csv(instance))
+        return VRPInstanceInput(df=load_instance(instance))
+
+    def _build_model(self, instance: str | VRPInstanceInput):
+        inp = self._load_instance_input(instance)
+        df = inp.df.copy()
         df.columns = df.columns.str.strip()
 
         m = pyvrp.Model()
@@ -124,10 +136,15 @@ class HGSSolver:
                 name=f"Client {int(row['CUST NO.'])}",
             )
 
-        for frm in m.locations:
-            for to in m.locations:
-                dist = int(math.hypot(frm.x - to.x, frm.y - to.y))
-                m.add_edge(frm, to, distance=dist, duration=dist)
+        locs = list(m.locations)
+        for i, frm in enumerate(locs):
+            for j, to in enumerate(locs):
+                if inp.dist_matrix is not None:
+                    dist = int(inp.dist_matrix[i][j])
+                else:
+                    dist = int(math.hypot(frm.x - to.x, frm.y - to.y))
+                duration = int(inp.time_matrix[i][j]) if inp.time_matrix is not None else dist
+                m.add_edge(frm, to, distance=dist, duration=duration)
 
         return m, m.data()
 

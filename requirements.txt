@@ -5,3 +5,9 @@ seaborn
 networkx
 tqdm
 pyvrp
+kagglehub
+alns
+folium
+shapely
+osmnx
+scikit-learn

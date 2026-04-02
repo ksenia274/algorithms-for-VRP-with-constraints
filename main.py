@@ -37,8 +37,6 @@ def run_simple(args):
 def run_simple_rectangle_splitting(args):
     from algorithms.rectangle_splitting import RSSolver, GenericSolution
     from algorithms.hgs_solver_simple import HGSSolver
-    
-    print("Running Rectangle Splitting with Simple HGS...")
 
     hgs_simple = HGSSolver(
         time_limit=max(1, int(args.time / 5)),
@@ -52,18 +50,18 @@ def run_simple_rectangle_splitting(args):
             self.base_solver = base_solver
             
         def optimize(self, instance_path: str, max_obj2: float) -> GenericSolution:
-            self.base_solver.set_vehicle_capacity(int(max_obj2))
+            self.base_solver.set_max_distance(max_obj2)
             res = self.base_solver.solve(instance_path)
             return GenericSolution(
                 obj1=res.total_distance,
-                obj2=res.metadata["max_duration"] if res.feasible else max_obj2,
+                obj2=res.metadata["max_distance"] if res.feasible else max_obj2,
                 is_feasible=res.feasible,
                 payload=res
             )
 
     rs_solver = RSSolver[SolverResult](DurationAdapter(hgs_simple), time_limit=args.time)
-    
-    pareto_frontier = rs_solver.solve(args.instance, min_obj1=0, max_obj2=args.capacity)
+    max_total_distance = 10000
+    pareto_frontier = rs_solver.solve(args.instance, max_obj1=max_total_distance, min_obj2=0)
     sol = min(pareto_frontier, key=lambda s: s.fairness.fairness_score)
     
     print(f"Feasible:       {sol.feasible}")

@@ -9,10 +9,11 @@ from data.load_solomon import load_instance
 
 
 class HGSSolver:
-    def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25):
+    def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25, max_distance=None):
         self.time_limit = time_limit
         self.seed = seed
         self.vehicle_capacity = vehicle_capacity
+        self.max_distance = max_distance
         self.num_vehicles = num_vehicles
         self._cache_instance_name = None
         self._cache_df = None
@@ -25,8 +26,8 @@ class HGSSolver:
             self._cache_instance_name = instance_name
         return self._cache_df
     
-    def set_vehicle_capacity(self, vehicle_capacity: int):
-        self.vehicle_capacity = vehicle_capacity
+    def set_max_distance(self, max_distance: float):
+        self.max_distance = max_distance
 
     def solve(self, instance_name) -> SolverResult:
         df = self._get_df(instance_name)
@@ -42,12 +43,21 @@ class HGSSolver:
             name="Depot",
         )
 
-        m.add_vehicle_type(
-            num_available=self.num_vehicles,
-            capacity=[self.vehicle_capacity],
-            start_depot=depot,
-            end_depot=depot,
-        )
+        if self.max_distance and self.max_distance < math.inf:
+            m.add_vehicle_type(
+                num_available=self.num_vehicles,
+                capacity=[self.vehicle_capacity],
+                start_depot=depot,
+                end_depot=depot,
+                max_distance=int(self.max_distance),
+            )
+        else: 
+            m.add_vehicle_type(
+                num_available=self.num_vehicles,
+                capacity=[self.vehicle_capacity],
+                start_depot=depot,
+                end_depot=depot,
+            )
 
         for _, row in df.iloc[1:].iterrows():
             m.add_client(
@@ -75,6 +85,7 @@ class HGSSolver:
         if best.is_feasible():
             routes = [route.visits() for route in best.routes()]
             actual_max_duration = max([float(route.duration()) for route in best.routes()]) if routes else 0.0
-            return SolverResult.from_routes_pyvrp_adapter(routes, m.data(), max_duration=actual_max_duration)
+            actual_max_distance = max([float(route.distance()) for route in best.routes()]) if routes else 0.0
+            return SolverResult.from_routes_pyvrp_adapter(routes, m.data(), max_duration=actual_max_duration, max_distance=actual_max_distance)
         else:
             return SolverResult.infeasible()

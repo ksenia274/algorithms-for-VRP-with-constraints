@@ -54,28 +54,23 @@ class RSSolver[T]:
     def solve(
         self,
         instance_path: str,
-        min_obj1: float = 0,
-        max_obj2: float = 10000,
+        max_obj1: float = 10000,
+        min_obj2: float = 0,
     ) -> list[T]:
         start_time = time.perf_counter()
 
         optimization_result = self._optimize_with_constraint(
-            instance_path, max_obj2=max_obj2
+            instance_path, max_obj2=math.inf
         )
         x, is_feasible = optimization_result.point, optimization_result.is_feasible
 
         pareto_set = [optimization_result]
-        rectangles = {_Rectangle(x, _Point(min_obj1, max_obj2))}
+        rectangles = {_Rectangle(x, _Point(max_obj1, min_obj2))}
         while time.perf_counter() - start_time < self.time_limit:
-            max_rectangle = None
-            max_area = -math.inf
-            for r in rectangles:
-                if r.area() > max_area:
-                    max_area = r.area()
-                    max_rectangle = r
-
-            if max_rectangle is None:
+            if not rectangles:
                 break
+
+            max_rectangle = max(rectangles, key=lambda r: r.area())
 
             y1 = max_rectangle.z1
             y2 = max_rectangle.z2
@@ -91,6 +86,7 @@ class RSSolver[T]:
                 rectangles.remove(max_rectangle)
                 rectangles.add(_Rectangle(y1, _Point(y2.x, c)))
             else:
+                pareto_set = [p for p in pareto_set if not x.dominates(p.point)]
                 pareto_set.append(optimization_result)
                 r1 = None
                 for rect in rectangles:
@@ -104,6 +100,11 @@ class RSSolver[T]:
                         r2 = rect
                         break
 
+                rectangles_to_remove = [
+                    rect for rect in rectangles if x.dominates(rect.z1)
+                ]
+                rectangles.difference_update(rectangles_to_remove)
+
                 if r1 is not None:
                     rectangles.discard(r1)
                     rectangles.add(_Rectangle(r1.z1, _Point(x.x, max(r1.z2.y, c))))
@@ -111,11 +112,6 @@ class RSSolver[T]:
                 if r2 is not None:
                     rectangles.discard(r2)
                     rectangles.add(_Rectangle(_Point(max(x.x, r2.z1.x), x.y), r2.z2))
-
-                rectangles_to_remove = [
-                    rect for rect in rectangles if x.dominates(rect.z1)
-                ]
-                rectangles.difference_update(rectangles_to_remove)
 
         return list(map(lambda result: result.payload, pareto_set))
 

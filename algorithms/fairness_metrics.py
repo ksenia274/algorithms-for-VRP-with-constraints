@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Sequence
+
+from pyvrp import ProblemData
 
 
 @dataclass
@@ -16,9 +19,9 @@ class FairnessReport:
     dist_range: float = 0.0
     dist_min: float = 0.0
     dist_max: float = 0.0
-    dist_cv: float = 0.0          
-    dist_jain: float = 0.0        
-    dist_gini: float = 0.0        
+    dist_cv: float = 0.0
+    dist_jain: float = 0.0
+    dist_gini: float = 0.0
 
     load_mean: float = 0.0
     load_std: float = 0.0
@@ -57,7 +60,6 @@ class FairnessReport:
             f"    (0 = perfectly fair, lower is better)",
         ]
         return "\n".join(lines)
-
 
 
 def _mean(vals: list[float]) -> float:
@@ -111,7 +113,6 @@ def _gini(vals: list[float]) -> float:
     return 1.0 - (2.0 * area) / (n * total) + 1.0 / n
 
 
-
 def compute_fairness(
     route_distances: list[float],
     route_loads: list[float],
@@ -163,9 +164,42 @@ def compute_fairness(
     report.clients_jain = _jain(rc_f)
 
     report.fairness_score = (
-        weight_dist * report.dist_cv
-        + weight_load * report.load_cv
-        + weight_clients * _cv(rc_f)
+            weight_dist * report.dist_cv
+            + weight_load * report.load_cv
+            + weight_clients * _cv(rc_f)
     )
 
     return report
+
+
+def compute_fairness_for_routes(
+        routes: list[list[int]],
+        distance_matrix: Sequence[Sequence[float]],
+        loc_loads: Sequence[float]) -> FairnessReport:
+    depot = 0
+    distances = []
+    loads = []
+    clients_count = []
+    durations = []
+
+    for route in routes:
+        d = 0
+        prev = depot
+        for c in route:
+            d += distance_matrix[prev][c]
+            prev = c
+        d += distance_matrix[prev][depot]
+        distances.append(float(d))
+
+        ld = sum(loc_loads[c] for c in route)
+        loads.append(float(ld))
+
+        clients_count.append(len(route))
+        durations.append(float(d))
+
+    return compute_fairness(
+        route_distances=distances,
+        route_loads=loads,
+        route_clients=clients_count,
+        route_durations=durations,
+    )

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import math
 
-import pandas as pd
 import pyvrp
 import pyvrp.stop
 
-from algorithms.fairness_metrics import FairnessReport, compute_fairness
 from algorithms.fairness_rebalancer import rebalance
+from algorithms.solver_result import SolverResult
 from data.load_solomon import load_instance
 
 
@@ -30,7 +29,7 @@ class HGSSolver:
         self.max_cost_increase_pct = max_cost_increase_pct
         self.rebalance_iterations = rebalance_iterations
 
-    def solve(self, instance_name: str) -> dict:
+    def solve(self, instance_name: str) -> tuple[SolverResult, SolverResult]:
         model, data = self._build_model(instance_name)
 
         result = model.solve(
@@ -40,21 +39,19 @@ class HGSSolver:
 
         best = result.best
         if not best.is_feasible():
-            return {
-                "routes": [],
-                "total_distance": float("inf"),
-                "num_routes": 0,
-                "feasible": False,
-                "fairness": None,
-                "fairness_before": None,
-                "rebalance_moves": 0,
-                "cost_delta_pct": 0.0,
-            }
+            infeasible = SolverResult(
+                routes=[],
+                total_distance=float("inf"),
+                num_routes=0,
+                feasible=False,
+                fairness=None,
+                metadata={"rebalance_moves": 0, "cost_delta_pct": 0.0})
+            return infeasible, infeasible
 
         raw_routes = [route.visits() for route in best.routes()]
         hgs_distance = best.distance()
 
-        fairness_before = self._compute_fairness_for_routes(data, raw_routes)
+        before = SolverResult.from_routes_pyvrp_adapter(raw_routes, data)
 
         if self.enable_fairness and len(raw_routes) >= 2:
             rb = rebalance(
@@ -72,24 +69,16 @@ class HGSSolver:
             final_distance = float(hgs_distance)
             rebalance_moves = 0
 
-        fairness_after = self._compute_fairness_for_routes(data, final_routes)
-
         cost_delta = (
             (final_distance - hgs_distance) / hgs_distance * 100.0
             if hgs_distance > 0
             else 0.0
         )
 
-        return {
-            "routes": final_routes,
-            "total_distance": final_distance,
-            "num_routes": len(final_routes),
-            "feasible": True,
-            "fairness": fairness_after,
-            "fairness_before": fairness_before,
-            "rebalance_moves": rebalance_moves,
-            "cost_delta_pct": cost_delta,
-        }
+        after = SolverResult.from_routes_pyvrp_adapter(final_routes, data, rebalance_moves=rebalance_moves,
+                                                       cost_delta_pct=cost_delta)
+
+        return before, after
 
     def _build_model(self, instance_name: str):
         df = load_instance(instance_name)
@@ -130,42 +119,3 @@ class HGSSolver:
                 m.add_edge(frm, to, distance=dist, duration=dist)
 
         return m, m.data()
-
-    def _compute_fairness_for_routes(
-        self,
-        data,
-        routes: list[list[int]],
-    ) -> FairnessReport:
-        dm = data.distance_matrix(0)
-        depot = 0
-
-        distances = []
-        loads = []
-        clients_count = []
-        durations = []
-
-        for route in routes:
-            d = 0
-            prev = depot
-            for c in route:
-                d += dm[prev, c]
-                prev = c
-            d += dm[prev, depot]
-            distances.append(float(d))
-
-            ld = 0
-            for c in route:
-                loc = data.location(c)
-                if hasattr(loc, "delivery") and loc.delivery:
-                    ld += loc.delivery[0]
-            loads.append(float(ld))
-
-            clients_count.append(len(route))
-            durations.append(float(d))
-
-        return compute_fairness(
-            route_distances=distances,
-            route_loads=loads,
-            route_clients=clients_count,
-            route_durations=durations,
-        )

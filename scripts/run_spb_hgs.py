@@ -90,11 +90,15 @@ def problem_to_instance_input(problem: dict, capacity: int):
             "SERVICE TIME": int(service_times[i]) if i < len(service_times) else 0,
         })
 
+    raw_scores = problem.get("point_scores")
+    point_scores = [int(s) for s in raw_scores] if raw_scores else None
+
     return VRPInstanceInput(
         df=pd.DataFrame(rows),
         dist_matrix=dist_matrix,
         recommended_capacity=capacity,
         coordinates=coordinates,
+        point_scores=point_scores,
     )
 
 
@@ -123,6 +127,8 @@ def main():
                         help="Output HTML map file (default: map_results.html)")
     parser.add_argument("--no-fairness", action="store_true",
                         help="Disable fairness rebalancing")
+    parser.add_argument("--prizes", action="store_true",
+                        help="Enable Prize-Collecting mode (clients optional, scored by point_scores)")
     args = parser.parse_args()
 
     if args.load_json:
@@ -143,7 +149,8 @@ def main():
     from algorithms.hgs_solver import HGSSolver
 
     print(f"\nRunning HGS  (time={args.time}s  vehicles={args.vehicles}"
-          f"  capacity={capacity}  fairness={'off' if args.no_fairness else 'on'}) ...")
+          f"  capacity={capacity}  fairness={'off' if args.no_fairness else 'on'}"
+          f"  prizes={'on' if args.prizes else 'off'}) ...")
 
     solver = HGSSolver(
         time_limit=args.time,
@@ -151,6 +158,7 @@ def main():
         vehicle_capacity=capacity,
         num_vehicles=args.vehicles,
         enable_fairness=not args.no_fairness,
+        use_prizes=args.prizes,
     )
     _, sol = solver.solve(inp)
 

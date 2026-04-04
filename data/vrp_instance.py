@@ -12,6 +12,7 @@ class VRPInstanceInput:
     time_matrix: list[list[int]] | None = None
     recommended_capacity: int | None = None
     coordinates: list[tuple[float, float]] | None = None
+    point_scores: list[int] | None = None
 
 
 def load_instance_input(instance: str | VRPInstanceInput) -> VRPInstanceInput:

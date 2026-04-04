@@ -48,12 +48,16 @@ def load_yandex_instance(path: str) -> VRPInstanceInput:
     raw_coords = raw.get("coordinates")
     coordinates = [tuple(c) for c in raw_coords] if raw_coords else None
 
+    raw_scores = raw.get("point_scores")
+    point_scores = [int(s) for s in raw_scores] if raw_scores else None
+
     return VRPInstanceInput(
         df=df,
         dist_matrix=dist_matrix,
         time_matrix=time_matrix,
         recommended_capacity=max_load,
         coordinates=coordinates,
+        point_scores=point_scores,
     )
 
 

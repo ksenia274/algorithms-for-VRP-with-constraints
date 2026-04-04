@@ -20,6 +20,7 @@ class HGSSolver:
         enable_fairness: bool = True,
         max_cost_increase_pct: float = 5.0,
         rebalance_iterations: int = 3000,
+        use_prizes: bool = False,
     ):
         self.time_limit = time_limit
         self.seed = seed
@@ -28,6 +29,7 @@ class HGSSolver:
         self.enable_fairness = enable_fairness
         self.max_cost_increase_pct = max_cost_increase_pct
         self.rebalance_iterations = rebalance_iterations
+        self.use_prizes = use_prizes
 
     def solve(self, instance: str | VRPInstanceInput) -> tuple[SolverResult, SolverResult]:
         model, data = self._build_model(instance)
@@ -94,8 +96,9 @@ class HGSSolver:
             end_depot=depot,
         )
 
-        for _, row in df.iloc[1:].iterrows():
-            m.add_client(
+        scores = inp.point_scores if self.use_prizes else None
+        for idx, (_, row) in enumerate(df.iloc[1:].iterrows()):
+            client_kwargs: dict = dict(
                 x=int(row["XCOORD."]),
                 y=int(row["YCOORD."]),
                 delivery=[int(row["DEMAND"])],
@@ -104,6 +107,10 @@ class HGSSolver:
                 service_duration=int(row["SERVICE TIME"]),
                 name=f"Client {int(row['CUST NO.'])}",
             )
+            if scores is not None:
+                client_kwargs["required"] = False
+                client_kwargs["prize"] = int(scores[idx]) * 100 if idx < len(scores) else 0
+            m.add_client(**client_kwargs)
 
         locs = list(m.locations)
         for i, frm in enumerate(locs):

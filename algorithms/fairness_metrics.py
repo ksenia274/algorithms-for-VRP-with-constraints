@@ -4,8 +4,6 @@ import math
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from pyvrp import ProblemData
-
 
 @dataclass
 class FairnessReport:
@@ -74,16 +72,11 @@ def _std(vals: list[float]) -> float:
 
 
 def _cv(vals: list[float]) -> float:
-    """Coefficient of Variation: std / mean."""
     m = _mean(vals)
     return _std(vals) / m if m > 0 else 0.0
 
 
 def _jain(vals: list[float]) -> float:
-    """
-    Jain's Fairness Index:  (Σ xi)² / (n · Σ xi²)
-    Возвращает 1.0 при полном равенстве.
-    """
     n = len(vals)
     if n == 0:
         return 1.0
@@ -95,9 +88,6 @@ def _jain(vals: list[float]) -> float:
 
 
 def _gini(vals: list[float]) -> float:
-    """
-    Gini coefficient: 0 = полное равенство, 1 = полное неравенство.
-    """
     n = len(vals)
     if n < 2:
         return 0.0
@@ -164,36 +154,30 @@ def compute_fairness(
     report.clients_jain = _jain(rc_f)
 
     report.fairness_score = (
-            weight_dist * report.dist_cv
-            + weight_load * report.load_cv
-            + weight_clients * _cv(rc_f)
+        weight_dist * report.dist_cv
+        + weight_load * report.load_cv
+        + weight_clients * _cv(rc_f)
     )
 
     return report
 
 
 def compute_fairness_for_routes(
-        routes: list[list[int]],
-        distance_matrix: Sequence[Sequence[float]],
-        loc_loads: Sequence[float]) -> FairnessReport:
+    routes: list[list[int]],
+    distance_matrix: Sequence[Sequence[float]],
+    loc_loads: Sequence[float],
+) -> FairnessReport:
     depot = 0
-    distances = []
-    loads = []
-    clients_count = []
-    durations = []
+    distances, loads, clients_count, durations = [], [], [], []
 
     for route in routes:
-        d = 0
-        prev = depot
+        d, prev = 0, depot
         for c in route:
             d += distance_matrix[prev][c]
             prev = c
         d += distance_matrix[prev][depot]
         distances.append(float(d))
-
-        ld = sum(loc_loads[c] for c in route)
-        loads.append(float(ld))
-
+        loads.append(float(sum(loc_loads[c] for c in route)))
         clients_count.append(len(route))
         durations.append(float(d))
 

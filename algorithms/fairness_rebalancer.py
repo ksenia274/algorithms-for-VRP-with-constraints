@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import math
 import random
 from dataclasses import dataclass
@@ -8,37 +7,22 @@ from dataclasses import dataclass
 import pyvrp._pyvrp as _pyvrp
 
 
-
 def _route_distances(data: _pyvrp.ProblemData, routes: list[list[int]]) -> list[float]:
-    dm = data.distance_matrix(0)           
-    depot = 0                               
+    dm = data.distance_matrix(0)
     dists = []
     for route in routes:
-        d = 0
-        prev = depot
+        d, prev = 0, 0
         for c in route:
             d += dm[prev, c]
             prev = c
-        d += dm[prev, depot]
+        d += dm[prev, 0]
         dists.append(float(d))
     return dists
 
 
-def _route_loads(data: _pyvrp.ProblemData, routes: list[list[int]]) -> list[float]:
-    loads = []
-    for route in routes:
-        ld = 0
-        for c in route:
-            loc = data.location(c)
-            ld += loc.delivery[0] if hasattr(loc, "delivery") and loc.delivery else 0
-        loads.append(float(ld))
-    return loads
-
-
 def _is_feasible(data: _pyvrp.ProblemData, routes: list[list[int]]) -> bool:
     try:
-        sol = _pyvrp.Solution(data, routes)
-        return sol.is_feasible()
+        return _pyvrp.Solution(data, routes).is_feasible()
     except Exception:
         return False
 
@@ -52,7 +36,6 @@ def _fairness_obj(dists: list[float]) -> float:
         return 0.0
     m = sum(dists) / len(dists)
     return math.sqrt(sum((d - m) ** 2 for d in dists) / len(dists))
-
 
 
 @dataclass
@@ -78,8 +61,7 @@ def rebalance(
     base_cost = _total_distance(data, current)
     cost_limit = base_cost * (1.0 + max_cost_increase_pct / 100.0)
 
-    dists_before = _route_distances(data, current)
-    fairness_before = _fairness_obj(dists_before)
+    fairness_before = _fairness_obj(_route_distances(data, current))
 
     best_routes = [list(r) for r in current]
     best_fairness = fairness_before
@@ -89,40 +71,32 @@ def rebalance(
         if len(current) < 2:
             break
 
-        if rng.random() < 0.7:
-            candidate = _try_relocate(data, current, rng)
-        else:
-            candidate = _try_swap(data, current, rng)
+        candidate = (
+            _try_relocate(data, current, rng)
+            if rng.random() < 0.7
+            else _try_swap(data, current, rng)
+        )
 
-        if candidate is None:
+        if candidate is None or not _is_feasible(data, candidate):
             continue
 
-        if not _is_feasible(data, candidate):
+        if _total_distance(data, candidate) > cost_limit:
             continue
 
-        new_cost = _total_distance(data, candidate)
-        if new_cost > cost_limit:
-            continue
-
-        new_dists = _route_distances(data, candidate)
-        new_fairness = _fairness_obj(new_dists)
-
+        new_fairness = _fairness_obj(_route_distances(data, candidate))
         if new_fairness < best_fairness:
             best_routes = [list(r) for r in candidate]
             best_fairness = new_fairness
             current = [list(r) for r in candidate]
             moves += 1
 
-    dists_after = _route_distances(data, best_routes)
-
     return RebalanceResult(
         routes=best_routes,
         total_distance=_total_distance(data, best_routes),
         fairness_std_before=fairness_before,
-        fairness_std_after=_fairness_obj(dists_after),
+        fairness_std_after=_fairness_obj(_route_distances(data, best_routes)),
         moves_applied=moves,
     )
-
 
 
 def _try_relocate(
@@ -132,8 +106,7 @@ def _try_relocate(
 ) -> list[list[int]] | None:
     dists = _route_distances(data, routes)
     order = sorted(range(len(routes)), key=lambda i: dists[i])
-    long_idx = order[-1]
-    short_idx = order[0]
+    long_idx, short_idx = order[-1], order[0]
 
     if long_idx == short_idx or len(routes[long_idx]) <= 1:
         return None
@@ -149,9 +122,7 @@ def _try_relocate(
         if short_idx > long_idx:
             short_idx -= 1
 
-    best_ins = _best_insert_pos(data, candidate[short_idx], client)
-    candidate[short_idx].insert(best_ins, client)
-
+    candidate[short_idx].insert(_best_insert_pos(data, candidate[short_idx], client), client)
     return candidate
 
 
@@ -162,12 +133,9 @@ def _try_swap(
 ) -> list[list[int]] | None:
     dists = _route_distances(data, routes)
     order = sorted(range(len(routes)), key=lambda i: dists[i])
-    long_idx = order[-1]
-    short_idx = order[0]
+    long_idx, short_idx = order[-1], order[0]
 
-    if long_idx == short_idx:
-        return None
-    if not routes[long_idx] or not routes[short_idx]:
+    if long_idx == short_idx or not routes[long_idx] or not routes[short_idx]:
         return None
 
     pos_long = rng.randrange(len(routes[long_idx]))
@@ -178,23 +146,16 @@ def _try_swap(
         candidate[short_idx][pos_short],
         candidate[long_idx][pos_long],
     )
-
     return candidate
 
 
-def _best_insert_pos(
-    data: _pyvrp.ProblemData,
-    route: list[int],
-    client: int,
-) -> int:
+def _best_insert_pos(data: _pyvrp.ProblemData, route: list[int], client: int) -> int:
     dm = data.distance_matrix(0)
-    depot = 0
-    best_cost = float("inf")
-    best_pos = 0
+    best_cost, best_pos = float("inf"), 0
 
     for pos in range(len(route) + 1):
-        prev = depot if pos == 0 else route[pos - 1]
-        nxt = depot if pos == len(route) else route[pos]
+        prev = 0 if pos == 0 else route[pos - 1]
+        nxt = 0 if pos == len(route) else route[pos]
         cost = dm[prev, client] + dm[client, nxt] - dm[prev, nxt]
         if cost < best_cost:
             best_cost = cost

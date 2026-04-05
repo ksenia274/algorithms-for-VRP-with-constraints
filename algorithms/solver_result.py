@@ -12,7 +12,7 @@ class SolverResult:
     total_distance: float
     num_routes: int
     feasible: bool
-    fairness: FairnessReport
+    fairness: FairnessReport | None
     metadata: dict[str, Any]
 
     @classmethod
@@ -22,31 +22,29 @@ class SolverResult:
             total_distance=float("inf"),
             num_routes=0,
             feasible=False,
-            fairness=FairnessReport(),
+            fairness=None,
             metadata=kwargs,
         )
 
     @classmethod
-    def from_routes(cls, routes: list[list[int]], distance_matrix: Sequence[Sequence[float]], loc_loads: Sequence[float],
-                    **kwargs) -> SolverResult:
+    def from_routes(
+        cls,
+        routes: list[list[int]],
+        distance_matrix: Sequence[Sequence[float]],
+        loc_loads: Sequence[float],
+        **kwargs,
+    ) -> SolverResult:
         depot = 0
-        distances = []
-        loads = []
-        clients_count = []
-        durations = []
+        distances, loads, clients_count, durations = [], [], [], []
 
         for route in routes:
-            d = 0
-            prev = depot
+            d, prev = 0, depot
             for c in route:
                 d += distance_matrix[prev][c]
                 prev = c
             d += distance_matrix[prev][depot]
             distances.append(float(d))
-
-            ld = sum(loc_loads[c] for c in route)
-            loads.append(float(ld))
-
+            loads.append(float(sum(loc_loads[c] for c in route)))
             clients_count.append(len(route))
             durations.append(float(d))
 
@@ -66,17 +64,13 @@ class SolverResult:
         )
 
     @classmethod
-    def from_routes_pyvrp_adapter(cls, routes: list[list[int]] , data: ProblemData, **kwargs) -> SolverResult:
+    def from_routes_pyvrp_adapter(
+        cls, routes: list[list[int]], data: ProblemData, **kwargs
+    ) -> SolverResult:
         dm = data.distance_matrix(0)
-        loc_loads = [0.] * data.num_locations
+        loc_loads = [0.0] * data.num_locations
         for i in range(1, data.num_locations):
             loc = data.location(i)
             if hasattr(loc, "delivery") and loc.delivery:
                 loc_loads[i] = loc.delivery[0]
-
-        return cls.from_routes(
-            routes=routes,
-            distance_matrix=dm,
-            loc_loads=loc_loads,
-            **kwargs,
-        )
+        return cls.from_routes(routes=routes, distance_matrix=dm, loc_loads=loc_loads, **kwargs)

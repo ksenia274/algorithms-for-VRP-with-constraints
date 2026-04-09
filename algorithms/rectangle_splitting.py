@@ -3,6 +3,8 @@ import time
 from typing import Protocol
 from dataclasses import dataclass
 
+import concurrent.futures
+
 
 @dataclass(frozen=True)
 class _Point:
@@ -47,9 +49,11 @@ class RSSolver[T]:
         self,
         solver: ConstrainedSolver[T],
         time_limit: int = 60,
+        max_workers: int = 1,
     ):
         self.solver = solver
         self.time_limit = time_limit
+        self.max_workers = max_workers
 
     def solve(
         self,
@@ -57,6 +61,8 @@ class RSSolver[T]:
         max_obj1: float = 10000,
         min_obj2: float = 0,
     ) -> list[T]:
+        print(f"Running on {self.max_workers} threads")
+
         start_time = time.perf_counter()
 
         optimization_result = self._optimize_with_constraint(
@@ -66,52 +72,77 @@ class RSSolver[T]:
 
         pareto_set = [optimization_result]
         rectangles = {_Rectangle(x, _Point(max_obj1, min_obj2))}
-        while time.perf_counter() - start_time < self.time_limit:
-            if not rectangles:
-                break
 
-            max_rectangle = max(rectangles, key=lambda r: r.area())
+        running_tasks: dict[concurrent.futures.Future, _Rectangle] = {}
 
-            y1 = max_rectangle.z1
-            y2 = max_rectangle.z2
-            c = 0.5 * (y1.y + y2.y)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            while time.perf_counter() - start_time < self.time_limit:
+                while len(running_tasks) < self.max_workers and rectangles:
+                    max_rectangle = max(rectangles, key=lambda r: r.area())
+                    rectangles.remove(max_rectangle)
 
-            optimization_result = self._optimize_with_constraint(
-                instance_path, max_obj2=c
-            )
-            x, is_feasible = optimization_result.point, optimization_result.is_feasible
-            is_dominated = any(p.point.dominates(x) or p.point == x for p in pareto_set)
+                    y1 = max_rectangle.z1
+                    y2 = max_rectangle.z2
+                    c = 0.5 * (y1.y + y2.y)
 
-            if not is_feasible or is_dominated:
-                rectangles.remove(max_rectangle)
-                rectangles.add(_Rectangle(y1, _Point(y2.x, c)))
-            else:
-                pareto_set = [p for p in pareto_set if not x.dominates(p.point)]
-                pareto_set.append(optimization_result)
-                r1 = None
-                for rect in rectangles:
-                    if rect.z1.x < x.x <= rect.z2.x:
-                        r1 = rect
-                        break
+                    future = executor.submit(self._optimize_with_constraint, instance_path, c)
+                    running_tasks[future] = max_rectangle
+                
+                if not running_tasks:
+                    break
 
-                r2 = None
-                for rect in rectangles:
-                    if rect.z1.y >= x.y >= rect.z2.y:
-                        r2 = rect
-                        break
+                timeout = self.time_limit - (time.perf_counter() - start_time)
+                done, _ = concurrent.futures.wait(
+                    running_tasks.keys(),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                    timeout=timeout if timeout > 0 else 0
+                )
 
-                rectangles_to_remove = [
-                    rect for rect in rectangles if x.dominates(rect.z1)
-                ]
-                rectangles.difference_update(rectangles_to_remove)
+                for fut in done:
+                    max_rectangle = running_tasks.pop(fut)
+                    rectangles.add(max_rectangle)
+                    optimization_result = fut.result()
 
-                if r1 is not None:
-                    rectangles.discard(r1)
-                    rectangles.add(_Rectangle(r1.z1, _Point(x.x, max(r1.z2.y, c))))
+                    y1 = max_rectangle.z1
+                    y2 = max_rectangle.z2
+                    c = 0.5 * (y1.y + y2.y)
 
-                if r2 is not None:
-                    rectangles.discard(r2)
-                    rectangles.add(_Rectangle(_Point(max(x.x, r2.z1.x), x.y), r2.z2))
+                    x, is_feasible = optimization_result.point, optimization_result.is_feasible
+                    is_dominated = any(p.point.dominates(x) or p.point == x for p in pareto_set)
+
+                    if not is_feasible or is_dominated:
+                        rectangles.remove(max_rectangle)
+                        rectangles.add(_Rectangle(y1, _Point(y2.x, c)))
+                    else:
+                        pareto_set = [p for p in pareto_set if not x.dominates(p.point)]
+                        pareto_set.append(optimization_result)
+                        r1 = None
+                        for rect in rectangles:
+                            if rect.z1.x < x.x <= rect.z2.x:
+                                r1 = rect
+                                break
+
+                        r2 = None
+                        for rect in rectangles:
+                            if rect.z1.y >= x.y >= rect.z2.y:
+                                r2 = rect
+                                break
+
+                        rectangles_to_remove = [
+                            rect for rect in rectangles if x.dominates(rect.z1)
+                        ]
+                        rectangles.difference_update(rectangles_to_remove)
+
+                        if r1 is not None:
+                            rectangles.discard(r1)
+                            rectangles.add(_Rectangle(r1.z1, _Point(x.x, max(r1.z2.y, c))))
+
+                        if r2 is not None:
+                            rectangles.discard(r2)
+                            rectangles.add(_Rectangle(_Point(max(x.x, r2.z1.x), x.y), r2.z2))
+
+        for fut in running_tasks:
+            fut.cancel()
 
         return list(map(lambda result: result.payload, pareto_set))
 

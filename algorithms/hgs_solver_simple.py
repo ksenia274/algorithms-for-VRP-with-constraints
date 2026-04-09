@@ -9,11 +9,10 @@ from data.load_solomon import load_instance
 
 
 class HGSSolver:
-    def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25, max_distance=None):
+    def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25):
         self.time_limit = time_limit
         self.seed = seed
         self.vehicle_capacity = vehicle_capacity
-        self.max_distance = max_distance
         self.num_vehicles = num_vehicles
         self._cache_instance_name = None
         self._cache_df = None
@@ -25,11 +24,8 @@ class HGSSolver:
             self._cache_df = df
             self._cache_instance_name = instance_name
         return self._cache_df
-    
-    def set_max_distance(self, max_distance: float):
-        self.max_distance = max_distance
 
-    def solve(self, instance_name) -> SolverResult:
+    def solve(self, instance_name, max_distance: float = math.inf) -> SolverResult:
         df = self._get_df(instance_name)
 
         m = pyvrp.Model()
@@ -43,13 +39,13 @@ class HGSSolver:
             name="Depot",
         )
 
-        if self.max_distance and self.max_distance < math.inf:
+        if max_distance and max_distance < math.inf:
             m.add_vehicle_type(
                 num_available=self.num_vehicles,
                 capacity=[self.vehicle_capacity],
                 start_depot=depot,
                 end_depot=depot,
-                max_distance=int(self.max_distance),
+                max_distance=int(max_distance),
             )
         else: 
             m.add_vehicle_type(

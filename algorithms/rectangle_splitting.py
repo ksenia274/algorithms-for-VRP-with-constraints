@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import concurrent.futures
 
+from data.vrp_instance import VRPInstanceInput
+
 
 @dataclass(frozen=True)
 class _Point:
@@ -40,7 +42,7 @@ class GenericSolution[T]:
 
 
 class ConstrainedSolver[T](Protocol):
-    def optimize(self, instance_path: str, max_obj2: float) -> GenericSolution[T]:
+    def optimize(self, instance: str | VRPInstanceInput, max_obj2: float) -> GenericSolution[T]:
         """Minimizes obj1 subject to obj2 <= max_obj2"""
         ...
 
@@ -55,13 +57,13 @@ class RSSolver[T]:
         self.time_limit = time_limit
         self.max_workers = max_workers
 
-        self.points_history: list[tuple[_Point, int]] = []
-        self.final_rectangles: set[_Rectangle] = set()
-        self.pareto_set: list[_OptimizationResult[T]] = []
+        self.points_history = []
+        self.final_rectangles = set()
+        self.pareto_set = []
 
     def solve(
         self,
-        instance_path: str,
+        instance_path: str | VRPInstanceInput,
         max_obj1: float = 10000,
         min_obj2: float = 0,
     ) -> list[T]:
@@ -164,7 +166,7 @@ class RSSolver[T]:
         return list(map(lambda result: result.payload, pareto_set))
 
     def _optimize_with_constraint(
-        self, instance_path, max_obj2
+        self, instance_path: str | VRPInstanceInput, max_obj2
     ) -> _OptimizationResult[T]:
         result = self.solver.optimize(instance_path, max_obj2=max_obj2)
         point = _Point(result.obj1, result.obj2)

@@ -59,6 +59,8 @@ def main():
     parser.add_argument("--alns-iterations", type=int, default=25000)
     parser.add_argument("--fairness-weight", type=float, default=100.0)
     parser.add_argument("--num-threads", type=int, default=1)
+    parser.add_argument("--plot-pareto", action="store_true",
+                        help="Plot found solutions and the pareto frontier for the RS algorithm")
 
     args = parser.parse_args()
 

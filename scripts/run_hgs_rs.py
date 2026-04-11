@@ -1,12 +1,13 @@
 from algorithms.rectangle_splitting import GenericSolution
 from algorithms.hgs_solver_simple import HGSSolver
+from data.vrp_instance import VRPInstanceInput
 
 class DurationAdapter:
         def __init__(self, base_solver: HGSSolver):
             self.base_solver = base_solver
 
-        def optimize(self, instance_path: str, max_obj2: float) -> GenericSolution:
-            res = self.base_solver.solve(instance_path, max_distance=max_obj2)
+        def optimize(self, instance: str | VRPInstanceInput, max_obj2: float) -> GenericSolution:
+            res = self.base_solver.solve(instance, max_distance=max_obj2)
             return GenericSolution(
                 obj1=res.total_distance,
                 obj2=res.metadata["max_distance"] if res.feasible else max_obj2,
@@ -40,6 +41,6 @@ def run_hgs_rs(args):
         print(f"  Route {i + 1}: {route}")
     print(sol.fairness.summary())
 
-    if True:
+    if args.plot_pareto:
         from visualization.rectangle_splitting import plot_rectangle_splitting
         plot_rectangle_splitting(rs_solver, title=f"Rectangle Splitting on {args.instance}", obj1_name="Total Distance", obj2_name="Max Route Duration")

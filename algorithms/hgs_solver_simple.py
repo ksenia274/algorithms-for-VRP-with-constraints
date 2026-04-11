@@ -6,6 +6,7 @@ import pyvrp.stop
 
 from algorithms.solver_result import SolverResult
 from data.load_solomon import load_instance
+from data.vrp_instance import load_instance_input
 
 
 class HGSSolver:
@@ -25,8 +26,10 @@ class HGSSolver:
             self._cache_instance_name = instance_name
         return self._cache_df
 
-    def solve(self, instance_name, max_distance: float = math.inf) -> SolverResult:
-        df = self._get_df(instance_name)
+    def solve(self, instance, max_distance: float = math.inf) -> SolverResult:
+        inp = load_instance_input(instance)
+        df = inp.df.copy()
+        df.columns = df.columns.str.strip()
 
         m = pyvrp.Model()
 
@@ -66,10 +69,16 @@ class HGSSolver:
                 name=f"Client {int(row['CUST NO.'])}",
             )
 
-        for frm in m.locations:
-            for to in m.locations:
-                dist = int(math.hypot(frm.x - to.x, frm.y - to.y))
-                m.add_edge(frm, to, distance=dist, duration=dist)
+        locs = list(m.locations)
+        for i, frm in enumerate(locs):
+            for j, to in enumerate(locs):
+                dist = (
+                    int(inp.dist_matrix[i][j])
+                    if inp.dist_matrix is not None
+                    else int(math.hypot(frm.x - to.x, frm.y - to.y))
+                )
+                duration = int(inp.time_matrix[i][j]) if inp.time_matrix is not None else dist
+                m.add_edge(frm, to, distance=dist, duration=duration)
 
         result = m.solve(
             stop=pyvrp.stop.MaxRuntime(self.time_limit),

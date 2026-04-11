@@ -55,6 +55,10 @@ class RSSolver[T]:
         self.time_limit = time_limit
         self.max_workers = max_workers
 
+        self.points_history: list[tuple[_Point, int]] = []
+        self.final_rectangles: set[_Rectangle] = set()
+        self.pareto_set: list[_OptimizationResult[T]] = []
+
     def solve(
         self,
         instance_path: str,
@@ -64,11 +68,17 @@ class RSSolver[T]:
         print(f"Running on {self.max_workers} threads")
 
         start_time = time.perf_counter()
+        generation = 0
 
         optimization_result = self._optimize_with_constraint(
             instance_path, max_obj2=math.inf
         )
         x, is_feasible = optimization_result.point, optimization_result.is_feasible
+
+        if not is_feasible: 
+            return []
+        
+        self.points_history.append((x, generation))
 
         pareto_set = [optimization_result]
         rectangles = {_Rectangle(x, _Point(max_obj1, min_obj2))}
@@ -94,10 +104,11 @@ class RSSolver[T]:
                 timeout = self.time_limit - (time.perf_counter() - start_time)
                 done, _ = concurrent.futures.wait(
                     running_tasks.keys(),
-                    return_when=concurrent.futures.FIRST_COMPLETED,
+                    return_when=concurrent.futures.ALL_COMPLETED,
                     timeout=timeout if timeout > 0 else 0
                 )
 
+                generation += 1
                 for fut in done:
                     max_rectangle = running_tasks.pop(fut)
                     rectangles.add(max_rectangle)
@@ -109,6 +120,9 @@ class RSSolver[T]:
 
                     x, is_feasible = optimization_result.point, optimization_result.is_feasible
                     is_dominated = any(p.point.dominates(x) or p.point == x for p in pareto_set)
+
+                    if is_feasible:
+                        self.points_history.append((x, generation))
 
                     if not is_feasible or is_dominated:
                         rectangles.remove(max_rectangle)
@@ -143,6 +157,9 @@ class RSSolver[T]:
 
         for fut in running_tasks:
             fut.cancel()
+
+        self.final_rectangles = rectangles
+        self.pareto_set = pareto_set
 
         return list(map(lambda result: result.payload, pareto_set))
 

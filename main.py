@@ -58,6 +58,7 @@ def main():
     parser.add_argument("--rebalance-iters", type=int, default=3000)
     parser.add_argument("--alns-iterations", type=int, default=25000)
     parser.add_argument("--fairness-weight", type=float, default=100.0)
+    parser.add_argument("--num-threads", type=int, default=1)
 
     args = parser.parse_args()
 

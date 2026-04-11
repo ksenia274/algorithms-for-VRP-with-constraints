@@ -26,7 +26,7 @@ def run_hgs_rs(args):
         num_vehicles=args.vehicles,
     )
 
-    rs_solver = RSSolver[SolverResult](DurationAdapter(hgs_simple), time_limit=args.time, max_workers=4)
+    rs_solver = RSSolver[SolverResult](DurationAdapter(hgs_simple), time_limit=args.time, max_workers=args.num_threads)
     max_total_distance = 10000
     pareto_frontier = rs_solver.solve(args.instance, max_obj1=max_total_distance, min_obj2=0)
     sol = min(pareto_frontier, key=lambda s: s.fairness.fairness_score)
@@ -39,3 +39,7 @@ def run_hgs_rs(args):
     for i, route in enumerate(sol.routes):
         print(f"  Route {i + 1}: {route}")
     print(sol.fairness.summary())
+
+    if True:
+        from visualization.rectangle_splitting import plot_rectangle_splitting
+        plot_rectangle_splitting(rs_solver, title=f"Rectangle Splitting on {args.instance}", obj1_name="Total Distance", obj2_name="Max Route Duration")

@@ -43,10 +43,10 @@ def _extract_metrics(report):
 def run_benchmark(args):
     import pandas as pd
     from algorithms.hgs_solver import HGSSolver
+    from algorithms.hgs_solver_penalty import HGSSolverPenalty
     from algorithms.alns_solver import ALNSSolver
 
-    from main import Algorithm
-    algorithm = getattr(args, "algorithm", Algorithm.HGS_REBALANCE)
+    algorithm = getattr(args, "algorithm", None)
     dataset = getattr(args, "dataset", "solomon")
 
     if dataset == "yandex":
@@ -89,7 +89,9 @@ def run_benchmark(args):
 
         print(f"\n[{category}] {name} ... ", end="", flush=True)
 
-        if algorithm == Algorithm.ALNS:
+        alg_value = algorithm.value if hasattr(algorithm, "value") else str(algorithm)
+
+        if alg_value == "alns":
             solver = ALNSSolver(
                 time_limit=args.time,
                 seed=args.seed,
@@ -99,13 +101,36 @@ def run_benchmark(args):
                 fairness_weight=getattr(args, "fairness_weight", 100.0),
                 max_iterations=getattr(args, "alns_iterations", 25000),
             )
+        elif alg_value == "hgs_penalty":
+            solver = HGSSolverPenalty(
+                time_limit=args.time,
+                seed=args.seed,
+                vehicle_capacity=capacity,
+                num_vehicles=args.vehicles,
+                fairness_weight=getattr(args, "fairness_weight", 0.5),
+                num_restarts=getattr(args, "fair_restarts", 5),
+                max_cost_increase_pct=args.max_cost_increase,
+                display=False,
+            )
+        elif alg_value == "hgs_adaptive":
+            from algorithms.hgs_solver_adaptive import HGSSolverAdaptive
+            solver = HGSSolverAdaptive(
+                time_limit=args.time,
+                seed=args.seed,
+                vehicle_capacity=capacity,
+                num_vehicles=args.vehicles,
+                initial_route_balance=getattr(args, "route_balance", 500.0),
+                strategy=getattr(args, "strategy", "adaptive"),
+                decay=getattr(args, "decay", 0.9999),
+                target_feasibility=getattr(args, "target_feasibility", 0.5),
+            )
         else:
             solver = HGSSolver(
                 time_limit=args.time,
                 seed=args.seed,
                 vehicle_capacity=capacity,
                 num_vehicles=args.vehicles,
-                enable_fairness=(algorithm == Algorithm.HGS_REBALANCE),
+                enable_fairness=(alg_value == "hgs_rebalance"),
                 max_cost_increase_pct=args.max_cost_increase,
                 rebalance_iterations=args.rebalance_iters,
             )
@@ -119,7 +144,10 @@ def run_benchmark(args):
             continue
         elapsed = time.time() - t0
 
-        if isinstance(result, tuple):
+        if alg_value == "hgs_adaptive":
+            (_, sol), _ = result
+            sol_before = None
+        elif isinstance(result, tuple):
             sol_before, sol = result
         else:
             sol_before, sol = None, result

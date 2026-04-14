@@ -104,7 +104,6 @@ def problem_to_instance_input(problem: dict, capacity: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -113,22 +112,22 @@ def main():
     )
     parser.add_argument(
         "--save-json", default=None, metavar="PATH",
-        help="Save the generated problem JSON to this path (for reuse with --load-json)",
+        help="Save the generated problem JSON to this path",
     )
     parser.add_argument("--points", type=int, default=50,
                         help="Number of client points to generate (default: 50)")
     parser.add_argument("--time", type=int, default=30,
-                        help="HGS solver time limit in seconds (default: 30)")
+                        help="Solver time limit in seconds (default: 30)")
     parser.add_argument("--vehicles", type=int, default=10)
     parser.add_argument("--capacity", type=int, default=None,
-                        help="Max stops per vehicle (overrides max_load from JSON; default: 35)")
+                        help="Max stops per vehicle (overrides max_load from JSON)")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-map", default="map_results.html",
-                        help="Output HTML map file (default: map_results.html)")
-    parser.add_argument("--no-fairness", action="store_true",
-                        help="Disable fairness rebalancing")
-    parser.add_argument("--prizes", action="store_true",
-                        help="Enable Prize-Collecting mode (clients optional, scored by point_scores)")
+    parser.add_argument("--route-balance", type=float, default=500.0,
+                        help="Initial route_balance weight in AdaptiveObjective (default: 500.0)")
+    parser.add_argument("--decay", type=float, default=0.9999,
+                        help="LinearDecay coefficient for route_balance (default: 0.9999)")
+    parser.add_argument("--output-map", default="map_results_adaptive.html",
+                        help="Output HTML map file (default: map_results_adaptive.html)")
     args = parser.parse_args()
 
     if args.load_json:
@@ -146,31 +145,28 @@ def main():
 
     inp = problem_to_instance_input(problem, capacity)
 
-    from algorithms.hgs_solver import HGSSolver
+    from algorithms.hgs_solver_adaptive import HGSSolverAdaptive
 
-    print(f"\nRunning HGS  (time={args.time}s  vehicles={args.vehicles}"
-          f"  capacity={capacity}  fairness={'off' if args.no_fairness else 'on'}"
-          f"  prizes={'on' if args.prizes else 'off'}) ...")
+    print(f"\nRunning HGSSolverAdaptive  (time={args.time}s  vehicles={args.vehicles}"
+          f"  capacity={capacity}  route_balance={args.route_balance}"
+          f"  decay={args.decay}) ...")
 
-    solver = HGSSolver(
+    solver = HGSSolverAdaptive(
         time_limit=args.time,
         seed=args.seed,
         vehicle_capacity=capacity,
         num_vehicles=args.vehicles,
-        enable_fairness=not args.no_fairness,
-        use_prizes=args.prizes,
+        initial_route_balance=args.route_balance,
+        decay=args.decay,
     )
-    _, sol = solver.solve(inp)
+    (_, sol), objective = solver.solve(inp)
 
     print(f"\nFeasible:        {sol.feasible}")
     print(f"Total distance:  {sol.total_distance}")
     print(f"Num routes:      {sol.num_routes}")
-    print(f"Rebalance moves: {sol.metadata.get('rebalance_moves', 0)}")
-    print(f"Cost delta:      {sol.metadata.get('cost_delta_pct', 0.0):+.2f}%")
     if sol.fairness:
-        r = sol.fairness
-        print(f"Gini (after):    {r.dist_gini:.4f}")
-        print(f"CV   (after):    {r.dist_cv:.4f}")
+        print(f"Gini:            {sol.fairness.dist_gini:.4f}")
+        print(f"CV:              {sol.fairness.dist_cv:.4f}")
 
     if not sol.feasible:
         print("\nWARNING: infeasible — try --vehicles or --time.")
@@ -183,10 +179,15 @@ def main():
     else:
         print(f"\nAll {n_clients} clients are in routes.")
 
+    try:
+        history = objective.get_history_dataframe()
+        if history is not None and not history.empty:
+            print(f"\nAdaptiveObjective: {len(history)} iterations tracked")
+    except Exception:
+        pass
+
     if inp.coordinates is None:
         print("\nNo coordinates in instance — skipping map.")
-        print("Tip: use --save-json when generating to store coordinates,")
-        print("     then --load-json to reload with visualization support.")
         return
 
     from visualization.map_routes import plot_routes_on_map

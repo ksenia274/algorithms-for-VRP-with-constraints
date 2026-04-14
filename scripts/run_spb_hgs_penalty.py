@@ -109,26 +109,28 @@ def main():
     )
     parser.add_argument(
         "--load-json", default=None, metavar="PATH",
-        help="Skip generation, load an existing problem JSON (must contain 'coordinates')",
+        help="Skip generation, load an existing problem JSON",
     )
     parser.add_argument(
         "--save-json", default=None, metavar="PATH",
-        help="Save the generated problem JSON to this path (for reuse with --load-json)",
+        help="Save the generated problem JSON to this path",
     )
     parser.add_argument("--points", type=int, default=50,
                         help="Number of client points to generate (default: 50)")
     parser.add_argument("--time", type=int, default=30,
-                        help="HGS solver time limit in seconds (default: 30)")
+                        help="Solver time limit in seconds (default: 30)")
     parser.add_argument("--vehicles", type=int, default=10)
     parser.add_argument("--capacity", type=int, default=None,
-                        help="Max stops per vehicle (overrides max_load from JSON; default: 35)")
+                        help="Max stops per vehicle (overrides max_load from JSON)")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-map", default="map_results.html",
-                        help="Output HTML map file (default: map_results.html)")
-    parser.add_argument("--no-fairness", action="store_true",
-                        help="Disable fairness rebalancing")
-    parser.add_argument("--prizes", action="store_true",
-                        help="Enable Prize-Collecting mode (clients optional, scored by point_scores)")
+    parser.add_argument("--fairness-weight", type=float, default=0.5,
+                        help="Penalty scale for overloaded routes (default: 0.5)")
+    parser.add_argument("--fair-restarts", type=int, default=5,
+                        help="Number of HGS restarts with fairness penalty (default: 5)")
+    parser.add_argument("--max-cost-increase", type=float, default=5.0,
+                        help="Max allowed cost increase %% when accepting fairer solution (default: 5.0)")
+    parser.add_argument("--output-map", default="map_results_fair.html",
+                        help="Output HTML map file (default: map_results_fair.html)")
     args = parser.parse_args()
 
     if args.load_json:
@@ -146,31 +148,34 @@ def main():
 
     inp = problem_to_instance_input(problem, capacity)
 
-    from algorithms.hgs_solver import HGSSolver
+    from algorithms.hgs_solver_penalty import HGSSolverPenalty
 
-    print(f"\nRunning HGS  (time={args.time}s  vehicles={args.vehicles}"
-          f"  capacity={capacity}  fairness={'off' if args.no_fairness else 'on'}"
-          f"  prizes={'on' if args.prizes else 'off'}) ...")
+    print(f"\nRunning HGSSolverPenalty  (time={args.time}s  vehicles={args.vehicles}"
+          f"  capacity={capacity}  restarts={args.fair_restarts}"
+          f"  fairness_weight={args.fairness_weight}"
+          f"  max_cost_increase={args.max_cost_increase}%) ...")
 
-    solver = HGSSolver(
+    solver = HGSSolverPenalty(
         time_limit=args.time,
         seed=args.seed,
         vehicle_capacity=capacity,
         num_vehicles=args.vehicles,
-        enable_fairness=not args.no_fairness,
-        use_prizes=args.prizes,
+        fairness_weight=args.fairness_weight,
+        num_restarts=args.fair_restarts,
+        max_cost_increase_pct=args.max_cost_increase,
     )
-    _, sol = solver.solve(inp)
+    before, sol = solver.solve(inp)
 
     print(f"\nFeasible:        {sol.feasible}")
     print(f"Total distance:  {sol.total_distance}")
     print(f"Num routes:      {sol.num_routes}")
-    print(f"Rebalance moves: {sol.metadata.get('rebalance_moves', 0)}")
     print(f"Cost delta:      {sol.metadata.get('cost_delta_pct', 0.0):+.2f}%")
-    if sol.fairness:
-        r = sol.fairness
-        print(f"Gini (after):    {r.dist_gini:.4f}")
-        print(f"CV   (after):    {r.dist_cv:.4f}")
+
+    if before.fairness and sol.fairness:
+        print(f"\nGini  (before):  {before.fairness.dist_gini:.4f}")
+        print(f"Gini  (after):   {sol.fairness.dist_gini:.4f}")
+        print(f"CV    (before):  {before.fairness.dist_cv:.4f}")
+        print(f"CV    (after):   {sol.fairness.dist_cv:.4f}")
 
     if not sol.feasible:
         print("\nWARNING: infeasible — try --vehicles or --time.")
@@ -185,8 +190,6 @@ def main():
 
     if inp.coordinates is None:
         print("\nNo coordinates in instance — skipping map.")
-        print("Tip: use --save-json when generating to store coordinates,")
-        print("     then --load-json to reload with visualization support.")
         return
 
     from visualization.map_routes import plot_routes_on_map

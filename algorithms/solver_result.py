@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -69,8 +71,8 @@ class SolverResult:
     ) -> SolverResult:
         dm = data.distance_matrix(0)
         loc_loads = [0.0] * data.num_locations
-        for i in range(1, data.num_locations):
-            loc = data.location(i)
-            if hasattr(loc, "delivery") and loc.delivery:
-                loc_loads[i] = loc.delivery[0]
+        for j in range(data.num_clients):
+            client = data.client(j)
+            if client.delivery:
+                loc_loads[client.location] = float(client.delivery[0])
         return cls.from_routes(routes=routes, distance_matrix=dm, loc_loads=loc_loads, **kwargs)

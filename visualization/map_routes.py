@@ -61,4 +61,4 @@ def plot_routes_on_map(
             ).add_to(m)
 
     m.save(output_path)
-    print(f"Map saved → {output_path}")
+    print(f"Map saved -> {output_path}")

@@ -22,7 +22,11 @@ def _route_distances(data: _pyvrp.ProblemData, routes: list[list[int]]) -> list[
 
 def _is_feasible(data: _pyvrp.ProblemData, routes: list[list[int]]) -> bool:
     try:
-        return _pyvrp.Solution(data, routes).is_feasible()
+        pyvrp_routes = [
+            _pyvrp.Route(data, visits=[c - 1 for c in r], vehicle_type=0)
+            for r in routes if r
+        ]
+        return _pyvrp.Solution(data, pyvrp_routes).is_feasible()
     except Exception:
         return False
 

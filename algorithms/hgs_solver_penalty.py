@@ -1,85 +1,69 @@
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pyvrp
 import pyvrp.stop
+
+# TODO(fork): move ActivityType, Route, Solution to public API in PyVRP fork
 from pyvrp import Solution
 from pyvrp._pyvrp import ActivityType, Route
 
+from algorithms.algorithm_params import HgsPenaltyParams
 from algorithms.hgs_base import HGSBase
-from algorithms.solver_result import SolverResult
+from algorithms.solver_result import SolverConfig, SolverDiagnostics, SolverResult
 from data.vrp_instance import VRPInstanceInput
 
 
 class HGSSolverPenalty(HGSBase):
-    """
-    HGS с fairness через итеративную модификацию матрицы расстояний.
+    """HGS with iterative distance-matrix penalty to improve route-length fairness.
 
-    На каждой итерации:
-    1. Смотрим текущее лучшее решение (по оригинальным расстояниям)
-    2. Считаем длину каждого маршрута
-    3. Добавляем штраф к рёбрам маршрутов, длина которых > mean
-    4. Перезапускаем HGS с warm start и модифицированной матрицей
-
-    before — лучшее решение первого (чистого) запуска без штрафа.
-    after  — лучшее решение по оригинальным расстояниям среди всех рестартов.
+    before — first clean run without penalty.
+    after  — best solution by Gini across all restarts within cost budget.
     """
 
-    def __init__(
-        self,
-        time_limit: int = 60,
-        seed: int = 0,
-        vehicle_capacity: int = 100,
-        num_vehicles: int = 25,
-        fairness_weight: float = 0.3,
-        num_restarts: int = 5,
-        max_cost_increase_pct: float = 5.0,
-        display: bool = True,
-    ):
-        super().__init__(time_limit, seed, vehicle_capacity, num_vehicles)
-        self.fairness_weight = fairness_weight
-        self.num_restarts = num_restarts
-        self.max_cost_increase_pct = max_cost_increase_pct
-        self.display = display
+    def __init__(self, config: SolverConfig) -> None:
+        if not isinstance(config.algorithm_params, HgsPenaltyParams):
+            raise TypeError(f"Expected HgsPenaltyParams, got {type(config.algorithm_params)}")
+        super().__init__(config)
+        self.params: HgsPenaltyParams = config.algorithm_params
 
-    def solve(self, instance: str | VRPInstanceInput) -> tuple[SolverResult, SolverResult]:
+    def solve(self, instance: str | VRPInstanceInput) -> SolverResult:
+        t0 = time.perf_counter()
         _, base_data, orig_dm, _ = self._build_model(instance)
-        time_per_restart = max(1, self.time_limit // self.num_restarts)
+        time_per_restart = max(1, self.time_limit // self.params.num_restarts)
 
-        result = self._solve_data(base_data, time_per_restart, self.seed, display=self.display)
+        result = self._solve_data(base_data, time_per_restart, self.seed)
 
         if not result.best.is_feasible():
-            inf = SolverResult.infeasible(rebalance_moves=0, cost_delta_pct=0.0)
-            return inf, inf
+            diagnostics = SolverDiagnostics(
+                solve_time_s=time.perf_counter() - t0,
+                rebalance_moves=0,
+                cost_delta_pct=0.0,
+            )
+            return SolverResult.infeasible(config=self.config, diagnostics=diagnostics)
 
         best_solution = result.best
-        before = SolverResult.from_routes_pyvrp_adapter(
+        before = self._make_result(
             self._extract_routes(best_solution),
             base_data,
+            diagnostics=SolverDiagnostics(solve_time_s=0.0),
         )
 
         best_gini = before.fairness.distance.gini if before.fairness else float("inf")
-        cost_budget = before.total_distance * (1 + self.max_cost_increase_pct / 100.0)
+        cost_budget = before.total_distance * (1 + self.params.max_cost_increase_pct / 100.0)
 
-        if self.display:
-            f = before.fairness
-            gini_str = f"{f.distance.gini:.4f}" if f else "n/a"
-            print(f"[restart 0/{self.num_restarts - 1}] "
-                  f"dist: {before.total_distance:.1f} | routes: {before.num_routes} | gini: {gini_str}")
-
-        for iteration in range(self.num_restarts - 1):
+        for iteration in range(self.params.num_restarts - 1):
             routes = self._extract_routes(best_solution)
             penalty = self._compute_penalty_matrix(orig_dm, base_data.num_locations, routes)
-            penalized_data = base_data.replace(
-                distance_matrices=[orig_dm + penalty],
-            )
+            penalized_data = base_data.replace(distance_matrices=[orig_dm + penalty])
 
             initial = self._convert_solution(best_solution, penalized_data)
             result = self._solve_data(
                 penalized_data,
                 time_per_restart,
                 self.seed + iteration + 1,
-                display=False,
                 initial_solution=initial,
             )
 
@@ -88,60 +72,55 @@ class HGSSolverPenalty(HGSBase):
 
             candidate_routes = self._extract_routes(result.best)
             candidate_dist = self._routes_distance(candidate_routes, orig_dm)
-            candidate = SolverResult.from_routes_pyvrp_adapter(candidate_routes, base_data)
+            candidate = self._make_result(
+                candidate_routes, base_data,
+                diagnostics=SolverDiagnostics(solve_time_s=0.0),
+            )
             candidate_gini = candidate.fairness.distance.gini if candidate.fairness else float("inf")
-
-            if self.display:
-                marker = " *" if (candidate_gini < best_gini and candidate_dist <= cost_budget) else ""
-                print(f"[restart {iteration + 1}/{self.num_restarts - 1}] "
-                      f"dist: {candidate_dist:.1f} | routes: {len(candidate_routes)} | "
-                      f"gini: {candidate_gini:.4f}{marker}")
 
             if candidate_gini < best_gini and candidate_dist <= cost_budget:
                 best_solution = result.best
                 best_gini = candidate_gini
 
         final_routes = self._extract_routes(best_solution)
-        after = SolverResult.from_routes_pyvrp_adapter(
-            final_routes,
-            base_data,
-            rebalance_moves=self.num_restarts - 1,
-            cost_delta_pct=(
-                self._routes_distance(final_routes, orig_dm) / before.total_distance * 100.0 - 100.0
-                if before.total_distance > 0 else 0.0
-            ),
+        final_dist = self._routes_distance(final_routes, orig_dm)
+        cost_delta = (
+            (final_dist / before.total_distance * 100.0 - 100.0)
+            if before.total_distance > 0 else 0.0
         )
-        return before, after
+        diagnostics = SolverDiagnostics(
+            solve_time_s=time.perf_counter() - t0,
+            rebalance_moves=self.params.num_restarts - 1,
+            cost_delta_pct=cost_delta,
+        )
+        return self._make_result(final_routes, base_data, diagnostics=diagnostics, initial=before)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _solve_data(data, time_limit: int, seed: int, display: bool = True,
-                    initial_solution=None):
+    def _solve_data(data, time_limit: int, seed: int, initial_solution=None):
         model = pyvrp.Model.from_data(data)
         return model.solve(
             stop=pyvrp.stop.MaxRuntime(time_limit),
             seed=seed,
-            display=display,
+            display=False,
             initial_solution=initial_solution,
         )
 
-    def _compute_penalty_matrix(self, dm: np.ndarray, n: int,
-                                routes: list[list[int]]) -> np.ndarray:
+    def _compute_penalty_matrix(
+        self, dm: np.ndarray, n: int, routes: list[list[int]]
+    ) -> np.ndarray:
         route_lengths = [self._route_length(r, dm) for r in routes]
-
         if not route_lengths:
             return np.zeros((n, n), dtype=np.int64)
-
         mean_len = sum(route_lengths) / len(route_lengths)
         penalty = np.zeros((n, n), dtype=np.float64)
-
         for route, length in zip(routes, route_lengths):
             if length <= mean_len:
                 continue
-            scale = self.fairness_weight * (length - mean_len) / mean_len
+            scale = self.params.fairness_weight * (length - mean_len) / mean_len
             prev = 0
             for c in route:
                 penalty[prev, c] += dm[prev, c] * scale
@@ -149,7 +128,6 @@ class HGSSolverPenalty(HGSBase):
                 prev = c
             penalty[prev, 0] += dm[prev, 0] * scale
             penalty[0, prev] += dm[0, prev] * scale
-
         return penalty.astype(np.int64)
 
     @staticmethod
@@ -169,8 +147,7 @@ class HGSSolverPenalty(HGSBase):
         for c in route:
             d += dm[prev, c]
             prev = c
-        d += dm[prev, 0]
-        return d
+        return d + dm[prev, 0]
 
     @classmethod
     def _routes_distance(cls, routes: list[list[int]], dm: np.ndarray) -> float:

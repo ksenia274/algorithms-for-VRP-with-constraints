@@ -19,6 +19,7 @@ class PathsConfig(BaseModel):
     results: str = "results"
     archive: str = "results/archive"
     data_yandex: str = "data/yandex"
+    data_yandex_external: str = "../Fair_VRP_ala_Yandex/vrp_problems"
     data_solomon: str = "data/solomon"
 
 

@@ -1,48 +1,41 @@
 from __future__ import annotations
 
+import time
+
 import pyvrp
 import pyvrp.stop
 
+from algorithms.algorithm_params import HgsSimpleParams
 from algorithms.hgs_base import HGSBase
-from algorithms.solver_result import SolverResult
+from algorithms.solver_result import SolverConfig, SolverDiagnostics, SolverResult
 from data.vrp_instance import VRPInstanceInput
 
 
 class HGSSolverSimple(HGSBase):
-    def __init__(
-        self,
-        time_limit: int = 60,
-        seed: int = 0,
-        vehicle_capacity: int = 100,
-        num_vehicles: int = 25,
-        max_distance: float | None = None,
-    ):
-        super().__init__(time_limit, seed, vehicle_capacity, num_vehicles)
-        self.max_distance = max_distance
+    """Vanilla HGS with optional max-distance constraint. No fairness post-processing."""
 
-    def solve(self, instance: str | VRPInstanceInput) -> tuple[SolverResult, SolverResult]:
-        max_dist_int = int(self.max_distance) if self.max_distance else None
+    def __init__(self, config: SolverConfig) -> None:
+        if not isinstance(config.algorithm_params, HgsSimpleParams):
+            raise TypeError(f"Expected HgsSimpleParams, got {type(config.algorithm_params)}")
+        super().__init__(config)
+        self.params: HgsSimpleParams = config.algorithm_params
+
+    def solve(self, instance: str | VRPInstanceInput) -> SolverResult:
+        t0 = time.perf_counter()
+        max_dist_int = int(self.params.max_distance) if self.params.max_distance else None
         m, data, _, _ = self._build_model(instance, max_distance=max_dist_int)
 
         result = m.solve(
             stop=pyvrp.stop.MaxRuntime(self.time_limit),
             seed=self.seed,
         )
+        solve_time = time.perf_counter() - t0
         best = result.best
 
+        diagnostics = SolverDiagnostics(solve_time_s=solve_time)
+
         if not best.is_feasible():
-            inf = SolverResult.infeasible()
-            return inf, inf
+            return SolverResult.infeasible(config=self.config, diagnostics=diagnostics)
 
-        all_routes_obj = list(best.routes())
         routes = self._extract_routes(best)
-
-        actual_max_duration = max(float(r.duration()) for r in all_routes_obj) if all_routes_obj else 0.0
-        actual_max_distance = max(float(r.distance()) for r in all_routes_obj) if all_routes_obj else 0.0
-
-        sol = SolverResult.from_routes_pyvrp_adapter(
-            routes, data,
-            max_duration=actual_max_duration,
-            max_distance=actual_max_distance,
-        )
-        return sol, sol
+        return self._make_result(routes, data, diagnostics=diagnostics)

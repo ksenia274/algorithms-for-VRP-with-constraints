@@ -2,32 +2,26 @@ from __future__ import annotations
 
 import numpy as np
 import pyvrp
+
+# TODO(fork): move ActivityType to public API in PyVRP fork
 from pyvrp._pyvrp import ActivityType
 
+from algorithms.solver_result import SolverConfig, SolverResult, SolverDiagnostics
 from data.vrp_instance import VRPInstanceInput, load_instance_input
 
 
 class HGSBase:
-    """
-    Базовый класс для всех HGS-солверов.
-    Содержит общую логику построения модели PyVRP и извлечения маршрутов.
-    """
+    """Base class for all HGS solvers. Builds PyVRP models and extracts routes."""
 
-    def __init__(
-        self,
-        time_limit: int = 60,
-        seed: int = 0,
-        vehicle_capacity: int = 100,
-        num_vehicles: int = 25,
-    ):
-        self.time_limit = time_limit
-        self.seed = seed
-        self.vehicle_capacity = vehicle_capacity
-        self.num_vehicles = num_vehicles
+    def __init__(self, config: SolverConfig) -> None:
+        self.config = config
+        self.time_limit = config.time_limit
+        self.seed = config.seed
+        self.vehicle_capacity = config.capacity
+        self.num_vehicles = config.num_vehicles
 
     @staticmethod
     def _extract_routes(solution) -> list[list[int]]:
-        """Извлекает маршруты как списки location-индексов (1-based, depot=0)."""
         return [
             [act.idx + 1 for act in route if act.type == ActivityType.CLIENT]
             for route in solution.routes()
@@ -40,14 +34,9 @@ class HGSBase:
         use_prizes: bool = False,
         max_distance: int | None = None,
     ) -> tuple[pyvrp.Model, object, np.ndarray, np.ndarray]:
-        """
-        Строит PyVRP-модель из инстанса.
+        """Build a PyVRP model from an instance.
 
-        Возвращает (model, data, orig_dm, dur_dm), где:
-          - model   — pyvrp.Model (нужен для model.solve())
-          - data    — ProblemData (нужен для data.replace(), Route(), Solution())
-          - orig_dm — numpy int64 матрица расстояний (нужна penalty-солверу)
-          - dur_dm  — numpy int64 матрица длительностей
+        Returns (model, data, orig_dm, dur_dm).
         """
         inp = load_instance_input(instance)
         df = inp.df.copy()
@@ -110,3 +99,30 @@ class HGSBase:
                 m.add_edge(frm, to, distance=int(orig_dm[i, j]), duration=int(dur_dm[i, j]))
 
         return m, m.data(), orig_dm, dur_dm
+
+    def _make_result(
+        self,
+        routes: list[list[int]],
+        data,
+        *,
+        diagnostics: SolverDiagnostics,
+        initial: SolverResult | None = None,
+        artifacts: dict[str, str] | None = None,
+    ) -> SolverResult:
+        """Build SolverResult from extracted routes and PyVRP ProblemData."""
+        dm = data.distance_matrix(0)
+        loc_loads = [0.0] * data.num_locations
+        for j in range(data.num_clients):
+            client = data.client(j)
+            if client.delivery:
+                loc_loads[client.location] = float(client.delivery[0])
+        return SolverResult.from_routes(
+            routes=routes,
+            distance_matrix=dm,
+            loc_loads=loc_loads,
+            feasible=True,
+            config=self.config,
+            diagnostics=diagnostics,
+            initial=initial,
+            artifacts=artifacts,
+        )

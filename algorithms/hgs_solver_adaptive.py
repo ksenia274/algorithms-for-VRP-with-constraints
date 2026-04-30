@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+import time
+from pathlib import Path
+from typing import Optional
 
 import pyvrp.stop
 from pyvrp.adaptive_objective import (
@@ -19,37 +21,15 @@ from pyvrp._pyvrp import RandomNumberGenerator, Solution
 from pyvrp.search import LocalSearch, PerturbationManager, compute_neighbours
 from pyvrp.solve import SolveParams
 
+from algorithms.algorithm_params import HgsAdaptiveParams
 from algorithms.fairness_signal_strategy import FairnessSignalAdjustment
 from algorithms.hgs_base import HGSBase
-from algorithms.solver_result import SolverResult
+from algorithms.solver_result import SolverConfig, SolverDiagnostics, SolverResult
 from data.vrp_instance import VRPInstanceInput
 
 logger = logging.getLogger(__name__)
 
-
-def _save_trace(objective: AdaptiveObjective, path: str) -> None:
-    import os
-    import pandas as pd
-
-    df = objective.get_history_dataframe()
-    if df is None or df.empty:
-        return
-
-    df = df.copy()
-    w = df["weight_route_balance"]
-    nxt = w.shift(-1)
-    eps = 1e-9
-    event = pd.Series("hold", index=df.index, dtype=str)
-    event[nxt > w + eps] = "boost"
-    event[nxt < w - eps] = "decay"
-    event.iloc[-1] = "hold"  # last row has no next weight to compare
-    df["event"] = event
-
-    dir_ = os.path.dirname(path)
-    if dir_:
-        os.makedirs(dir_, exist_ok=True)
-    df.to_csv(path, index=False)
-    logger.info("Trace saved → %s (%d rows)", path, len(df))
+_LOG_EVERY = 100
 
 
 def _solve_with_weighted_objective(
@@ -61,15 +41,9 @@ def _solve_with_weighted_objective(
     params: SolveParams,
     objective: AdaptiveObjective,
 ):
-    """
-    Mirrors pyvrp.solve.solve() but patches PenaltyManager.cost_evaluator()
-    to inject the adaptive weights on every call.
+    """Mirror of pyvrp.solve.solve() with a monkey-patched PenaltyManager.
 
-    Without this patch, the ILS creates a fresh CostEvaluator (with zero
-    custom weights) at the start of every iteration, discarding any weights
-    applied by the on_iteration callback.  The patch ensures that every CE
-    returned by the PM already carries the current objective.weights, so the
-    search actually optimises for route balance.
+    # TODO(fork): replace monkey-patch when PyVRP fork exposes set_custom_weights publicly
     """
     rng = RandomNumberGenerator(seed=seed)
     neighbours = compute_neighbours(data, params.neighbourhood)
@@ -84,11 +58,7 @@ def _solve_with_weighted_objective(
     pm = PenaltyManager(penalties, params.penalty)
 
     # THE FIX: wrap cost_evaluator() so every new CE gets current weights.
-    # The ILS calls pm.cost_evaluator() at the start of every iteration,
-    # creating a brand-new CostEvaluator with zero custom weights.  Any
-    # weights applied by the on_iteration callback to the previous CE are
-    # silently discarded.  This patch propagates the current objective weights
-    # into each freshly created CE before the search step uses it.
+    # TODO(fork): replace monkey-patch when PyVRP fork exposes set_custom_weights publicly
     _orig_ce = pm.cost_evaluator
 
     def _weighted_ce():
@@ -105,123 +75,144 @@ def _solve_with_weighted_objective(
     return algo.run(stop, collect_stats, display, params.display_interval)
 
 
-class HGSSolverAdaptive(HGSBase):
+def _save_artifacts(
+    objective: AdaptiveObjective,
+    run_dir: Path,
+) -> dict[str, str]:
+    """Save weight_history.csv.gz and trace.csv.gz to run_dir.
 
-    def __init__(
-        self,
-        time_limit: int = 60,
-        seed: int = 0,
-        vehicle_capacity: int = 100,
-        num_vehicles: int = 25,
-        initial_route_balance: float = 500.0,
-        strategy: Literal["linear", "fairness_signal"] = "linear",
-        # linear strategy
-        decay: float = 0.99999,
-        min_weight: float = 0.0,
-        max_weight: float = 1e9,
-        # fairness_signal strategy
-        target_cv: float = 0.2,
-        hold_band: float = 0.05,
-        boost_factor: float = 1.05,
-        fs_decay_factor: float = 0.995,
-        fs_ma_window: int = 20,
-        # objective update cadence (iterations between weight updates)
-        update_every: int = 1,
-        display: bool = True,
-    ):
-        super().__init__(time_limit, seed, vehicle_capacity, num_vehicles)
-        self.initial_route_balance = initial_route_balance
-        self.strategy = strategy
-        self.decay = decay
-        self.min_weight = min_weight
-        self.max_weight = max_weight
-        self.target_cv = target_cv
-        self.hold_band = hold_band
-        self.boost_factor = boost_factor
-        self.fs_decay_factor = fs_decay_factor
-        self.fs_ma_window = fs_ma_window
-        self.update_every = update_every
-        self.display = display
+    Returns dict of relative artifact paths.
+    """
+    import pandas as pd
+
+    df = objective.get_history_dataframe()
+    if df is None or df.empty:
+        return {}
+
+    df = df.copy()
+
+    # Compute event column from weight shifts
+    w = df["weight_route_balance"]
+    nxt = w.shift(-1)
+    eps = 1e-9
+    event = pd.Series("hold", index=df.index, dtype=str)
+    event[nxt > w + eps] = "boost"
+    event[nxt < w - eps] = "decay"
+    event.iloc[-1] = "hold"
+    df["event"] = event
+
+    # Add both CV variants; rename old column
+    if "route_balance" in df.columns:
+        df = df.rename(columns={"route_balance": "route_range_pct"})
+    elif "route_range_pct" not in df.columns:
+        if "max_route_dist" in df.columns and "min_route_dist" in df.columns:
+            mean_ = (df["max_route_dist"] + df["min_route_dist"]) / 2.0
+            df["route_range_pct"] = (df["max_route_dist"] - df["min_route_dist"]) / mean_.replace(0, float("nan"))
+        else:
+            df["route_range_pct"] = float("nan")
+
+    # route_cv: proper std/mean — not reconstructible from max/min alone, set NaN
+    # A future PyVRP fork version could expose per-route distances in IterationMetrics
+    if "route_cv" not in df.columns:
+        df["route_cv"] = float("nan")
+
+    artifacts: dict[str, str] = {}
+
+    trace_path = run_dir / "trace.csv.gz"
+    df.to_csv(trace_path, index=False, compression="gzip")
+    artifacts["trace"] = "trace.csv.gz"
+
+    weight_cols = [c for c in df.columns if c.startswith("weight_")]
+    weight_history_path = run_dir / "weight_history.csv.gz"
+    df[["iteration"] + weight_cols + ["event"]].to_csv(
+        weight_history_path, index=False, compression="gzip"
+    )
+    artifacts["weight_history"] = "weight_history.csv.gz"
+
+    logger.info("Artifacts saved to %s (%d rows)", run_dir, len(df))
+    return artifacts
+
+
+class HGSSolverAdaptive(HGSBase):
+    """HGS with adaptive route-balance objective weight."""
+
+    def __init__(self, config: SolverConfig) -> None:
+        if not isinstance(config.algorithm_params, HgsAdaptiveParams):
+            raise TypeError(f"Expected HgsAdaptiveParams, got {type(config.algorithm_params)}")
+        super().__init__(config)
+        self.params: HgsAdaptiveParams = config.algorithm_params
 
     def solve(
-        self, instance: str | VRPInstanceInput, trace_path: str | None = None
-    ) -> tuple[tuple[SolverResult, SolverResult], AdaptiveObjective]:
+        self,
+        instance: str | VRPInstanceInput,
+        *,
+        run_dir: Optional[Path] = None,
+    ) -> SolverResult:
+        t0 = time.perf_counter()
         _, data, _, _ = self._build_model(instance)
+        p = self.params
 
-        if self.strategy == "fairness_signal":
+        if p.strategy == "fairness_signal":
             strat = FairnessSignalAdjustment(
-                target_cv=self.target_cv,
-                hold_band=self.hold_band,
-                boost_factor=self.boost_factor,
-                decay_factor=self.fs_decay_factor,
-                ma_window=self.fs_ma_window,
-                min_weight=self.min_weight if self.min_weight > 0 else 1.0,
-                max_weight=self.max_weight,
+                target_cv=p.target_cv,
+                hold_band=p.hold_band,
+                boost_factor=p.boost_factor,
+                decay_factor=p.fs_decay_factor,
+                ma_window=p.fs_ma_window,
+                min_weight=p.min_weight if p.min_weight > 0 else 1.0,
+                max_weight=p.max_weight,
             )
         else:
-            strat = LinearDecay(decay=self.decay)
+            strat = LinearDecay(decay=p.decay)
 
         objective = AdaptiveObjective(
-            initial_weights=ObjectiveWeights(route_balance=self.initial_route_balance),
+            initial_weights=ObjectiveWeights(route_balance=p.initial_route_balance),
             strategy=strat,
-            update_every=self.update_every,
+            update_every=p.update_every,
         )
 
         adaptive_cb = objective.as_callback()
-        _log_every = 100
 
-        class _LoggingCallback(IteratedLocalSearchCallbacks):
+        class _Callback(IteratedLocalSearchCallbacks):
             def on_iteration(self, current, candidate, best, cost_evaluator):
                 adaptive_cb.on_iteration(current, candidate, best, cost_evaluator)
                 n = objective.iteration
-                if n == 1:
-                    logger.debug("Adaptive callback: first iteration reached")
-                if n % _log_every == 0:
+                if n % _LOG_EVERY == 0:
                     hist = objective.get_history()
                     feas = hist[-1].feasibility_rate if hist else float("nan")
-                    logger.debug(
-                        "iter=%d  route_balance_weight=%.4f  feasibility_rate=%.3f",
-                        n, objective.weights.route_balance, feas,
-                    )
+                    logger.debug("iter=%d  rb_weight=%.4f  feas=%.3f", n, objective.weights.route_balance, feas)
 
             def on_restart(self, best):
                 adaptive_cb.on_restart(best)
-                logger.debug("Adaptive callback: restart at iter=%d", objective.iteration)
 
         result = _solve_with_weighted_objective(
             data=data,
             stop=pyvrp.stop.MaxRuntime(self.time_limit),
             seed=self.seed,
             collect_stats=True,
-            display=self.display,
-            params=SolveParams(
-                ils=IteratedLocalSearchParams(callbacks=_LoggingCallback())
-            ),
+            display=False,
+            params=SolveParams(ils=IteratedLocalSearchParams(callbacks=_Callback())),
             objective=objective,
         )
-        if objective.iteration == 0:
-            logger.warning("Adaptive callback was NEVER called — check ILS params registration")
-        else:
-            logger.info("Adaptive callback: total iterations=%d", objective.iteration)
 
-        weight_applied_count = objective.iteration // self.update_every
-        logger.debug("weight_applied_count=%d", weight_applied_count)
+        weight_applied_count = objective.iteration // p.update_every if p.update_every else 0
+        solve_time = time.perf_counter() - t0
+
+        artifacts: dict[str, str] = {}
+        if p.trace and run_dir is not None:
+            try:
+                artifacts = _save_artifacts(objective, run_dir)
+            except Exception:
+                logger.exception("Failed to save adaptive artifacts")
 
         best = result.best
-
-        if trace_path is not None:
-            _save_trace(objective, trace_path)
-
-        if not best.is_feasible():
-            inf = SolverResult.infeasible(
-                rebalance_moves=weight_applied_count,
-                cost_delta_pct=0.0,
-            )
-            return (inf, inf), objective
-
-        raw_routes = self._extract_routes(best)
-        solver_result = SolverResult.from_routes_pyvrp_adapter(
-            raw_routes, data, rebalance_moves=weight_applied_count
+        diagnostics = SolverDiagnostics(
+            solve_time_s=solve_time,
+            weight_applied_count=weight_applied_count,
         )
 
-        return (solver_result, solver_result), objective
+        if not best.is_feasible():
+            return SolverResult.infeasible(config=self.config, diagnostics=diagnostics)
+
+        routes = self._extract_routes(best)
+        return self._make_result(routes, data, diagnostics=diagnostics, artifacts=artifacts or None)

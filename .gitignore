@@ -5,9 +5,18 @@ env/
 __pycache__/
 cache/
 
+# local planning docs
+REFACTOR_AUDIT.md
+docs/
+
 # generated outputs
 install_log.txt
 map_results.html
 visualization/map_results/
 visualization/output/
-results/*.txt
+
+# all generated results (archive, runs, benchmarks — only local)
+results/
+
+# large trace CSVs anywhere else
+**/trace_*.csv

@@ -172,10 +172,10 @@ def main():
     print(f"Cost delta:      {sol.metadata.get('cost_delta_pct', 0.0):+.2f}%")
 
     if before.fairness and sol.fairness:
-        print(f"\nGini  (before):  {before.fairness.dist_gini:.4f}")
-        print(f"Gini  (after):   {sol.fairness.dist_gini:.4f}")
-        print(f"CV    (before):  {before.fairness.dist_cv:.4f}")
-        print(f"CV    (after):   {sol.fairness.dist_cv:.4f}")
+        print(f"\nGini         (before):  {before.fairness.distance.gini:.4f}")
+        print(f"Gini         (after):   {sol.fairness.distance.gini:.4f}")
+        print(f"Worst ratio  (before):  {before.fairness.distance.worst_ratio:.4f}")
+        print(f"Worst ratio  (after):   {sol.fairness.distance.worst_ratio:.4f}")
 
     if not sol.feasible:
         print("\nWARNING: infeasible — try --vehicles or --time.")

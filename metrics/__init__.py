@@ -1,6 +1,3 @@
-# Re-export from metrics.fairness for backward compatibility with existing solvers.
-# The canonical location is metrics/fairness.py.
-from metrics.fairness import *  # noqa: F401, F403
 from metrics.fairness import (
     DimensionMetrics,
     FairnessReport,

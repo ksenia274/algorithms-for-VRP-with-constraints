@@ -167,8 +167,8 @@ def main():
     print(f"Num routes:     {sol.num_routes}")
     if sol.fairness:
         r = sol.fairness
-        print(f"Gini:           {r.dist_gini:.4f}")
-        print(f"CV:             {r.dist_cv:.4f}")
+        print(f"Gini:           {r.distance.gini:.4f}")
+        print(f"Worst ratio:    {r.distance.worst_ratio:.4f}")
 
     if not sol.feasible:
         print("\nWARNING: infeasible — try more --vehicles or --time.")

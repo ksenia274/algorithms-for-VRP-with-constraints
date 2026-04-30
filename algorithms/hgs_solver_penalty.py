@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pyvrp
 import pyvrp.stop
 from pyvrp import Solution
 from pyvrp._pyvrp import ActivityType, Route
 
+from algorithms.hgs_base import HGSBase
 from algorithms.solver_result import SolverResult
-from data.vrp_instance import VRPInstanceInput, load_instance_input
+from data.vrp_instance import VRPInstanceInput
 
 
-class HGSSolverPenalty:
+class HGSSolverPenalty(HGSBase):
     """
-    HGS с fairness прямо в solve-цикле через итеративную модификацию
-    матрицы расстояний.
+    HGS с fairness через итеративную модификацию матрицы расстояний.
 
     На каждой итерации:
     1. Смотрим текущее лучшее решение (по оригинальным расстояниям)
@@ -38,20 +36,15 @@ class HGSSolverPenalty:
         max_cost_increase_pct: float = 5.0,
         display: bool = True,
     ):
-        self.time_limit = time_limit
-        self.seed = seed
-        self.vehicle_capacity = vehicle_capacity
-        self.num_vehicles = num_vehicles
+        super().__init__(time_limit, seed, vehicle_capacity, num_vehicles)
         self.fairness_weight = fairness_weight
         self.num_restarts = num_restarts
         self.max_cost_increase_pct = max_cost_increase_pct
         self.display = display
 
     def solve(self, instance: str | VRPInstanceInput) -> tuple[SolverResult, SolverResult]:
-        inp = load_instance_input(instance)
+        _, base_data, orig_dm, _ = self._build_model(instance)
         time_per_restart = max(1, self.time_limit // self.num_restarts)
-
-        base_data, orig_dm, dur_dm = self._build_data(inp)
 
         result = self._solve_data(base_data, time_per_restart, self.seed, display=self.display)
 
@@ -65,8 +58,14 @@ class HGSSolverPenalty:
             base_data,
         )
 
-        best_gini = before.fairness.dist_gini if before.fairness else float("inf")
+        best_gini = before.fairness.distance.gini if before.fairness else float("inf")
         cost_budget = before.total_distance * (1 + self.max_cost_increase_pct / 100.0)
+
+        if self.display:
+            f = before.fairness
+            gini_str = f"{f.distance.gini:.4f}" if f else "n/a"
+            print(f"[restart 0/{self.num_restarts - 1}] "
+                  f"dist: {before.total_distance:.1f} | routes: {before.num_routes} | gini: {gini_str}")
 
         for iteration in range(self.num_restarts - 1):
             routes = self._extract_routes(best_solution)
@@ -90,7 +89,13 @@ class HGSSolverPenalty:
             candidate_routes = self._extract_routes(result.best)
             candidate_dist = self._routes_distance(candidate_routes, orig_dm)
             candidate = SolverResult.from_routes_pyvrp_adapter(candidate_routes, base_data)
-            candidate_gini = candidate.fairness.dist_gini if candidate.fairness else float("inf")
+            candidate_gini = candidate.fairness.distance.gini if candidate.fairness else float("inf")
+
+            if self.display:
+                marker = " *" if (candidate_gini < best_gini and candidate_dist <= cost_budget) else ""
+                print(f"[restart {iteration + 1}/{self.num_restarts - 1}] "
+                      f"dist: {candidate_dist:.1f} | routes: {len(candidate_routes)} | "
+                      f"gini: {candidate_gini:.4f}{marker}")
 
             if candidate_gini < best_gini and candidate_dist <= cost_budget:
                 best_solution = result.best
@@ -101,70 +106,16 @@ class HGSSolverPenalty:
             final_routes,
             base_data,
             rebalance_moves=self.num_restarts - 1,
-            cost_delta_pct=self._routes_distance(final_routes, orig_dm) / before.total_distance * 100.0 - 100.0
-            if before.total_distance > 0 else 0.0,
+            cost_delta_pct=(
+                self._routes_distance(final_routes, orig_dm) / before.total_distance * 100.0 - 100.0
+                if before.total_distance > 0 else 0.0
+            ),
         )
         return before, after
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _build_data(self, inp: VRPInstanceInput):
-        """
-        Builds ProblemData once. Returns (data, orig_dm, dur_dm) where
-        orig_dm and dur_dm are numpy int64 arrays used for fast matrix swaps.
-        """
-        df = inp.df.copy()
-        df.columns = df.columns.str.strip()
-
-        m = pyvrp.Model()
-
-        depot_row = df.iloc[0]
-        depot_loc = m.add_location(x=int(depot_row["XCOORD."]), y=int(depot_row["YCOORD."]))
-        depot = m.add_depot(
-            depot_loc,
-            tw_early=int(depot_row["READY TIME"]),
-            tw_late=int(depot_row["DUE DATE"]),
-            name="Depot",
-        )
-        m.add_vehicle_type(
-            num_available=self.num_vehicles,
-            capacity=[self.vehicle_capacity],
-            start_depot=depot,
-            end_depot=depot,
-        )
-        for _, row in df.iloc[1:].iterrows():
-            loc = m.add_location(x=int(row["XCOORD."]), y=int(row["YCOORD."]))
-            m.add_client(
-                loc,
-                delivery=[int(row["DEMAND"])],
-                tw_early=int(row["READY TIME"]),
-                tw_late=int(row["DUE DATE"]),
-                service_duration=int(row["SERVICE TIME"]),
-                name=f"Client {int(row['CUST NO.'])}",
-            )
-
-        locs = list(m.locations)
-        n = len(locs)
-
-        if inp.dist_matrix is not None:
-            orig_dm = np.array(inp.dist_matrix, dtype=np.int64)
-        else:
-            coords = np.array([(loc.x, loc.y) for loc in locs], dtype=np.float64)
-            dx = coords[:, 0:1] - coords[:, 0]
-            dy = coords[:, 1:2] - coords[:, 1]
-            orig_dm = np.hypot(dx, dy).astype(np.int64)
-
-        dur_dm = np.array(inp.time_matrix, dtype=np.int64) if inp.time_matrix is not None else orig_dm
-
-        # Add edges once using the original matrix
-        for i, frm in enumerate(locs):
-            for j, to in enumerate(locs):
-                m.add_edge(frm, to, distance=int(orig_dm[i, j]), duration=int(dur_dm[i, j]))
-
-        data = m.data()
-        return data, orig_dm, dur_dm
 
     @staticmethod
     def _solve_data(data, time_limit: int, seed: int, display: bool = True,
@@ -179,10 +130,6 @@ class HGSSolverPenalty:
 
     def _compute_penalty_matrix(self, dm: np.ndarray, n: int,
                                 routes: list[list[int]]) -> np.ndarray:
-        """
-        Returns an additive int64 penalty matrix. Edges belonging to routes
-        longer than the mean get a penalty proportional to their excess length.
-        """
         route_lengths = [self._route_length(r, dm) for r in routes]
 
         if not route_lengths:
@@ -215,13 +162,6 @@ class HGSSolverPenalty:
             return Solution(new_data, routes)
         except Exception:
             return None
-
-    @staticmethod
-    def _extract_routes(solution) -> list[list[int]]:
-        return [
-            [act.idx + 1 for act in route if act.type == ActivityType.CLIENT]
-            for route in solution.routes()
-        ]
 
     @staticmethod
     def _route_length(route: list[int], dm: np.ndarray) -> float:

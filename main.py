@@ -50,8 +50,10 @@ def main():
     bench.add_argument("--output", default="results")
     bench.add_argument("--route-balance", type=float, default=500.0)
     bench.add_argument("--decay", type=float, default=0.9999)
-    bench.add_argument("--strategy", choices=["linear", "adaptive"], default="linear")
-    bench.add_argument("--target-feasibility", type=float, default=0.5)
+    bench.add_argument("--strategy", choices=["linear", "fairness_signal"], default="linear")
+    bench.add_argument("--min-weight", type=float, default=0.0)
+    bench.add_argument("--max-weight", type=float, default=1e9)
+    bench.add_argument("--update-every", type=int, default=1)
 
     vis = subparsers.add_parser("visualise", help="Build charts from benchmark CSV")
     vis.add_argument("--csv", default="results/fairness_benchmark.csv")
@@ -70,8 +72,23 @@ def main():
     parser.add_argument("--fair-restarts", type=int, default=5)
     parser.add_argument("--route-balance", type=float, default=500.0)
     parser.add_argument("--decay", type=float, default=0.9999)
-    parser.add_argument("--strategy", choices=["linear", "adaptive"], default="linear")
-    parser.add_argument("--target-feasibility", type=float, default=0.5)
+    parser.add_argument("--strategy", choices=["linear", "fairness_signal"], default="linear")
+    parser.add_argument("--trace", action="store_true",
+                        help="Save per-iteration adaptive trace CSV to results/")
+    parser.add_argument("--trace-dir", default="results",
+                        help="Directory for trace CSV (default: results)")
+    parser.add_argument("--target-cv", type=float, default=0.2,
+                        help="FS: CV target (default: 0.2)")
+    parser.add_argument("--hold-band", type=float, default=0.05,
+                        help="FS: band around target_cv (default: 0.05)")
+    parser.add_argument("--boost-multiplier", type=float, default=1.05,
+                        help="FS: weight boost factor (default: 1.05)")
+    parser.add_argument("--decay-multiplier", type=float, default=0.995,
+                        help="FS: weight decay factor (default: 0.995)")
+    parser.add_argument("--min-weight", type=float, default=0.0,
+                        help="Min adaptive weight (default: 0.0)")
+    parser.add_argument("--max-weight", type=float, default=1e9,
+                        help="Max adaptive weight (default: 1e9)")
 
     args = parser.parse_args()
 

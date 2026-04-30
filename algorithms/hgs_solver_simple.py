@@ -1,91 +1,48 @@
-import math
+from __future__ import annotations
 
-import pandas as pd
 import pyvrp
 import pyvrp.stop
 
+from algorithms.hgs_base import HGSBase
 from algorithms.solver_result import SolverResult
-from data.load_solomon import load_instance
+from data.vrp_instance import VRPInstanceInput
 
 
-class HGSSolver:
-    def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25, max_distance=None):
-        self.time_limit = time_limit
-        self.seed = seed
-        self.vehicle_capacity = vehicle_capacity
-        self.max_distance = max_distance
-        self.num_vehicles = num_vehicles
-        self._cache_instance_name = None
-        self._cache_df = None
-
-    def _get_df(self, instance_name: str) -> pd.DataFrame:
-        if self._cache_df is None or self._cache_instance_name != instance_name:
-            df = load_instance(instance_name)
-            df.columns = df.columns.str.strip()
-            self._cache_df = df
-            self._cache_instance_name = instance_name
-        return self._cache_df
-    
-    def set_max_distance(self, max_distance: float):
+class HGSSolverSimple(HGSBase):
+    def __init__(
+        self,
+        time_limit: int = 60,
+        seed: int = 0,
+        vehicle_capacity: int = 100,
+        num_vehicles: int = 25,
+        max_distance: float | None = None,
+    ):
+        super().__init__(time_limit, seed, vehicle_capacity, num_vehicles)
         self.max_distance = max_distance
 
-    def solve(self, instance_name) -> SolverResult:
-        df = self._get_df(instance_name)
-
-        m = pyvrp.Model()
-
-        depot_row = df.iloc[0]
-        depot = m.add_depot(
-            x=int(depot_row["XCOORD."]),
-            y=int(depot_row["YCOORD."]),
-            tw_early=int(depot_row["READY TIME"]),
-            tw_late=int(depot_row["DUE DATE"]),
-            name="Depot",
-        )
-
-        if self.max_distance and self.max_distance < math.inf:
-            m.add_vehicle_type(
-                num_available=self.num_vehicles,
-                capacity=[self.vehicle_capacity],
-                start_depot=depot,
-                end_depot=depot,
-                max_distance=int(self.max_distance),
-            )
-        else: 
-            m.add_vehicle_type(
-                num_available=self.num_vehicles,
-                capacity=[self.vehicle_capacity],
-                start_depot=depot,
-                end_depot=depot,
-            )
-
-        for _, row in df.iloc[1:].iterrows():
-            m.add_client(
-                x=int(row["XCOORD."]),
-                y=int(row["YCOORD."]),
-                delivery=[int(row["DEMAND"])],
-                tw_early=int(row["READY TIME"]),
-                tw_late=int(row["DUE DATE"]),
-                service_duration=int(row["SERVICE TIME"]),
-                name=f"Client {int(row['CUST NO.'])}",
-            )
-
-        for frm in m.locations:
-            for to in m.locations:
-                dist = int(math.hypot(frm.x - to.x, frm.y - to.y))
-                m.add_edge(frm, to, distance=dist, duration=dist)
+    def solve(self, instance: str | VRPInstanceInput) -> tuple[SolverResult, SolverResult]:
+        max_dist_int = int(self.max_distance) if self.max_distance else None
+        m, data, _, _ = self._build_model(instance, max_distance=max_dist_int)
 
         result = m.solve(
             stop=pyvrp.stop.MaxRuntime(self.time_limit),
             seed=self.seed,
         )
-
         best = result.best
 
-        if best.is_feasible():
-            routes = [route.visits() for route in best.routes()]
-            actual_max_duration = max([float(route.duration()) for route in best.routes()]) if routes else 0.0
-            actual_max_distance = max([float(route.distance()) for route in best.routes()]) if routes else 0.0
-            return SolverResult.from_routes_pyvrp_adapter(routes, m.data(), max_duration=actual_max_duration, max_distance=actual_max_distance)
-        else:
-            return SolverResult.infeasible()
+        if not best.is_feasible():
+            inf = SolverResult.infeasible()
+            return inf, inf
+
+        all_routes_obj = list(best.routes())
+        routes = self._extract_routes(best)
+
+        actual_max_duration = max(float(r.duration()) for r in all_routes_obj) if all_routes_obj else 0.0
+        actual_max_distance = max(float(r.distance()) for r in all_routes_obj) if all_routes_obj else 0.0
+
+        sol = SolverResult.from_routes_pyvrp_adapter(
+            routes, data,
+            max_duration=actual_max_duration,
+            max_distance=actual_max_distance,
+        )
+        return sol, sol

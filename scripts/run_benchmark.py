@@ -30,13 +30,12 @@ def _extract_metrics(report):
     if report is None:
         return {}
     return {
-        "gini": getattr(report, "dist_gini", None),
-        "jain": getattr(report, "dist_jain", None),
-        "cv": getattr(report, "dist_cv", None),
-        "dist_std": getattr(report, "dist_std", None),
-        "dist_range": getattr(report, "dist_range", None),
-        "load_gini": getattr(report, "load_gini", None),
-        "score": getattr(report, "fairness_score", None),
+        "dist_worst_ratio": report.distance.worst_ratio,
+        "dist_gini": report.distance.gini,
+        "load_worst_ratio": report.load.worst_ratio,
+        "load_gini": report.load.gini,
+        "clients_worst_ratio": report.clients.worst_ratio,
+        "clients_gini": report.clients.gini,
     }
 
 
@@ -87,7 +86,7 @@ def run_benchmark(args):
             capacity = args.capacity
             instance_arg = instance_or_path
 
-        print(f"\n[{category}] {name} ... ", end="", flush=True)
+        print(f"[{category}] {name} ... ", end="", flush=True)
 
         alg_value = algorithm.value if hasattr(algorithm, "value") else str(algorithm)
 
@@ -120,9 +119,12 @@ def run_benchmark(args):
                 vehicle_capacity=capacity,
                 num_vehicles=args.vehicles,
                 initial_route_balance=getattr(args, "route_balance", 500.0),
-                strategy=getattr(args, "strategy", "adaptive"),
+                strategy=getattr(args, "strategy", "linear"),
                 decay=getattr(args, "decay", 0.9999),
-                target_feasibility=getattr(args, "target_feasibility", 0.5),
+                min_weight=getattr(args, "min_weight", 0.0),
+                max_weight=getattr(args, "max_weight", 1e9),
+                update_every=getattr(args, "update_every", 1),
+                display=False,
             )
         else:
             solver = HGSSolver(
@@ -133,6 +135,7 @@ def run_benchmark(args):
                 enable_fairness=(alg_value == "hgs_rebalance"),
                 max_cost_increase_pct=args.max_cost_increase,
                 rebalance_iterations=args.rebalance_iters,
+                display=False,
             )
 
         t0 = time.time()
@@ -169,15 +172,19 @@ def run_benchmark(args):
         }
         rows.append(row)
 
-        gini_b = before.get("gini")
-        gini_a = after.get("gini")
-        gini_str = ""
-        if gini_b is not None and gini_a is not None:
-            gini_str = f" | Gini {gini_b:.3f} -> {gini_a:.3f} ({gini_a - gini_b:+.3f})"
-
+        # --- per-instance status line ---
         status = "OK" if sol.feasible else "INFEASIBLE"
-        print(f"{status} | {elapsed:.1f}s | dist={sol.total_distance}"
-              f" | moves={sol.metadata.get('rebalance_moves', 0)}{gini_str}")
+        wr_b = before.get("dist_worst_ratio")
+        gini_b = before.get("dist_gini")
+        wr_a = after.get("dist_worst_ratio")
+        gini_a = after.get("dist_gini")
+        fairness_str = ""
+        if wr_a is not None:
+            b_str = f"wr={wr_b:.3f} gini={gini_b:.4f} -> " if wr_b is not None else ""
+            fairness_str = f" | {b_str}wr={wr_a:.3f} gini={gini_a:.4f}"
+
+        print(f"{status} | {elapsed:.1f}s | dist={sol.total_distance:.0f}"
+              f" | routes={sol.num_routes}{fairness_str}")
 
     os.makedirs(args.output, exist_ok=True)
     csv_path = os.path.join(args.output, "fairness_benchmark.csv")
@@ -188,10 +195,10 @@ def run_benchmark(args):
     print(f"\n{'=' * 72}")
     print(f"Saved to {csv_path}  ({len(rows)} instances, {feasible_n} feasible)")
 
-    if "gini_before" in df.columns:
-        print("\nMean Gini by category:")
-        print(df.groupby("category").agg(
-            gini_before=("gini_before", "mean"),
-            gini_after=("gini_after", "mean"),
-            avg_moves=("rebalance_moves", "mean"),
-        ).round(4).to_string())
+    if "dist_worst_ratio_after" in df.columns:
+        agg_cols = {"dist_worst_ratio_after": "mean", "dist_gini_after": "mean",
+                    "num_routes": "mean", "solve_time_s": "mean"}
+        if "dist_worst_ratio_before" in df.columns:
+            agg_cols["dist_worst_ratio_before"] = "mean"
+        print("\nMean dist_worst_ratio_after by category (1.0 = ideal, lower = more balanced):")
+        print(df[df["feasible"] == True].groupby("category").agg(agg_cols).round(3).to_string())

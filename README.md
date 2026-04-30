@@ -129,10 +129,17 @@ python main.py visualise --csv results/fairness_benchmark.csv --output visualiza
 
 | Файл | Содержание |
 |---|---|
-| `01_gini_before_after.png` | Gini до и после ребалансировки по каждому инстансу |
-| `02_category_summary.png` | Средние Gini, CV, fairness score, Gini нагрузки по категориям Solomon |
-| `03_metric_heatmap.png` | Тепловая карта fairness-метрик по инстансам |
-| `04_rebalance_moves.png` | Число ходов ребалансировки по инстансам |
+| `01_pareto.png` | Scatter: медианное расстояние vs. медианный `dist_worst_ratio` — компромисс стоимость/равномерность, фронт Парето |
+| `02_dimensions.png` | Сгруппированные бары: `worst_ratio` по трём измерениям (расстояние / нагрузка / клиенты) для каждого алгоритма |
+| `03_gini_distribution.png` | Скрипичный график: распределение `dist_gini` по инстансам для каждого алгоритма |
+| `04_category_heatmap.png` | Тепловая карта: медианный `dist_worst_ratio` по категориям Solomon × алгоритм |
+
+Для сравнения нескольких алгоритмов через CLI:
+
+```bash
+python visualization/fairness_charts.py results/hgs.csv results/alns.csv \
+    --labels "HGS rebalance" "ALNS" --output visualization/output
+```
 
 #### Маршруты на карте Санкт-Петербурга
 
@@ -207,11 +214,21 @@ python scripts/run_spb_hgs.py --points 100 --save-json my_problem.json
 
 ### Метрики fairness
 
-Вычисляются по расстоянию, нагрузке и числу клиентов на маршрут:
+Все метрики вычисляются независимо по трём измерениям: **расстояние**, **нагрузка**, **число клиентов** на маршрут.
 
-| Метрика | Описание |
-|---|---|
-| **Gini** | Коэффициент Джини (0 = равенство, 1 = максимальное неравенство) |
-| **Jain** | Индекс Джейна (1 = равенство) |
-| **CV** | Коэффициент вариации (std / mean) |
-| **Fairness score** | Взвешенная сумма CV: расстояния × 0.5 + нагрузка × 0.3 + клиенты × 0.2 |
+| Метрика | Формула | Интерпретация |
+|---|---|---|
+| **worst_ratio** | max / mean | Во сколько раз худший маршрут превышает средний. `1.0` = идеальный баланс, ≥ 1.0 всегда |
+| **gini** | Σᵢⱼ\|xᵢ−xⱼ\| / (2·n·Σxᵢ) | Коэффициент Джини из экономики. `0.0` = все маршруты одинаковы, `1.0` = максимальное неравенство |
+| **mean, std, min, max** | — | Базовые описательные статистики по маршрутам |
+
+**Столбцы в CSV** (суффиксы `_before` / `_after`):
+
+```
+dist_worst_ratio   load_worst_ratio   clients_worst_ratio
+dist_gini          load_gini          clients_gini
+```
+
+Плюс служебные: `feasible`, `total_distance`, `num_routes`, `rebalance_moves`, `cost_delta_pct`, `solve_time_s`, `category`.
+
+> Составная оценка (fairness score) и CV намеренно убраны — они вносили произвольные веса и мешали сравнению прогонов. Все выводы строятся на `worst_ratio` и `gini`.

@@ -1,0 +1,14 @@
+schema_version: "1.0"
+algorithm: alns
+instance: "03"
+instance_kind: yandex
+time_limit: 30
+seed: 42
+capacity: 200
+num_vehicles: 25
+algorithm_params:
+  enable_fairness: false
+  fairness_weight: 100.0
+  max_iterations: 25000
+  sa_start_temp: 100.0
+  sa_end_temp: 0.5

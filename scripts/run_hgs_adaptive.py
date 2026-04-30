@@ -1,5 +1,13 @@
 def run_hgs_adaptive(args):
+    import os
     from algorithms.hgs_solver_adaptive import HGSSolverAdaptive
+
+    trace_path = None
+    if getattr(args, "trace", False):
+        inst_name = os.path.splitext(os.path.basename(str(args.instance)))[0]
+        strat = getattr(args, "strategy", "linear")
+        trace_dir = getattr(args, "trace_dir", "results")
+        trace_path = f"{trace_dir}/trace_{strat}_instance{inst_name}.csv"
 
     (before, after), objective = HGSSolverAdaptive(
         time_limit=args.time,
@@ -7,28 +15,17 @@ def run_hgs_adaptive(args):
         vehicle_capacity=args.capacity,
         num_vehicles=args.vehicles,
         initial_route_balance=getattr(args, "route_balance", 500.0),
-        strategy=getattr(args, "strategy", "adaptive"),
+        strategy=getattr(args, "strategy", "linear"),
         decay=getattr(args, "decay", 0.9999),
-        target_feasibility=getattr(args, "target_feasibility", 0.5),
-    ).solve(args.instance)
+        target_cv=getattr(args, "target_cv", 0.2),
+        hold_band=getattr(args, "hold_band", 0.05),
+        boost_factor=getattr(args, "boost_multiplier", 1.05),
+        fs_decay_factor=getattr(args, "decay_multiplier", 0.995),
+        min_weight=getattr(args, "min_weight", 0.0),
+        max_weight=getattr(args, "max_weight", 1e9),
+    ).solve(args.instance, trace_path=trace_path)
 
-    print(f"Feasible:       {after.feasible}")
-    print(f"Total distance: {after.total_distance:.1f}")
-    print(f"Num routes:     {after.num_routes}")
-    print()
-
-    for i, route in enumerate(after.routes):
-        print(f"  Route {i + 1}: {route}")
-
-    print("\n=== Fairness metrics ===")
-    if after.feasible and after.fairness:
-        r = after.fairness
-        print(f"  Gini  dist={r.dist_gini:.4f}  load={r.load_gini:.4f}")
-        print(f"  CV    dist={r.dist_cv:.4f}  load={r.load_cv:.4f}")
-        print(f"  Jain  dist={r.dist_jain:.4f}  load={r.load_jain:.4f}")
-        print(f"  Fairness score: {r.fairness_score:.4f}")
-    else:
-        print("Not feasible")
+    print(after.summary("HGS Adaptive"))
 
     try:
         history = objective.get_history_dataframe()

@@ -1,0 +1,23 @@
+name: quick_test
+description: "Smoke test — проверка что вся инфраструктура работает."
+
+instances:
+  - {name: "01", kind: yandex}
+  - {name: "03", kind: yandex}
+
+algorithms:
+  - name: hgs_simple
+    type: hgs_simple
+    algorithm_params: {}
+  - name: hgs_adaptive_linear
+    type: hgs_adaptive
+    algorithm_params:
+      initial_route_balance: 500.0
+      strategy: linear
+      decay: 0.99999
+
+shared:
+  time_limit: 15
+  seed: 42
+  capacity: 200
+  num_vehicles: 25

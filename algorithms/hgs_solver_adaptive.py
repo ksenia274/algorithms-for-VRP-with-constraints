@@ -84,6 +84,7 @@ def _save_artifacts(
     Returns dict of relative artifact paths.
     """
     import pandas as pd
+    from metrics.fairness import coefficient_of_variation
 
     df = objective.get_history_dataframe()
     if df is None or df.empty:
@@ -101,19 +102,25 @@ def _save_artifacts(
     event.iloc[-1] = "hold"
     df["event"] = event
 
-    # Add both CV variants; rename old column
+    # Rename range-based metric and compute proper CV from per_route_distances
     if "route_balance" in df.columns:
         df = df.rename(columns={"route_balance": "route_range_pct"})
     elif "route_range_pct" not in df.columns:
         if "max_route_dist" in df.columns and "min_route_dist" in df.columns:
             mean_ = (df["max_route_dist"] + df["min_route_dist"]) / 2.0
-            df["route_range_pct"] = (df["max_route_dist"] - df["min_route_dist"]) / mean_.replace(0, float("nan"))
+            df["route_range_pct"] = (
+                (df["max_route_dist"] - df["min_route_dist"]) / mean_.replace(0, float("nan"))
+            )
         else:
             df["route_range_pct"] = float("nan")
 
-    # route_cv: proper std/mean — not reconstructible from max/min alone, set NaN
-    # A future PyVRP fork version could expose per-route distances in IterationMetrics
-    if "route_cv" not in df.columns:
+    # route_cv from per_route_distances in IterationMetrics history (added in fork bf44e9d)
+    hist = objective.get_history()
+    if hist and hasattr(hist[0], "per_route_distances"):
+        df["route_cv"] = [
+            coefficient_of_variation(m.per_route_distances) for m in hist
+        ]
+    else:
         df["route_cv"] = float("nan")
 
     artifacts: dict[str, str] = {}
@@ -128,6 +135,25 @@ def _save_artifacts(
         weight_history_path, index=False, compression="gzip"
     )
     artifacts["weight_history"] = "weight_history.csv.gz"
+
+    if hist:
+        diag_rows = []
+        for m in hist:
+            if m.iteration % _LOG_EVERY != 0:
+                continue
+            frb = m.route_balance
+            scv = coefficient_of_variation(m.per_route_distances) if m.per_route_distances else float("nan")
+            ratio = scv / frb if frb > 0 else float("nan")
+            diag_rows.append({
+                "iteration": m.iteration,
+                "forks_route_balance": frb,
+                "standard_cv": scv,
+                "ratio": ratio,
+            })
+        if diag_rows:
+            diag_path = run_dir / "cv_diagnostic.csv.gz"
+            pd.DataFrame(diag_rows).to_csv(diag_path, index=False, compression="gzip")
+            artifacts["cv_diagnostic"] = "cv_diagnostic.csv.gz"
 
     logger.info("Artifacts saved to %s (%d rows)", run_dir, len(df))
     return artifacts

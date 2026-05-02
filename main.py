@@ -1,123 +1,105 @@
 """
-Режимы:
-    python main.py --algorithm hgs_simple               # простой HGS на одном инстансе
-    python main.py --algorithm hgs_rebalance            # HGS + fairness rebalancing
-    python main.py --algorithm hgs_rs                   # HGS + rectangle splitting
-    python main.py --algorithm hgs_penalty              # HGS + итеративная штрафная матрица расстояний
-    python main.py --algorithm hgs_adaptive             # HGS + адаптивные веса fairness прямо в ILS (форк PyVRP)
-    python main.py --algorithm alns                     # ALNS solver с fairness
-    python main.py benchmark                            # прогон на всех solomon инстансах и вывод в CSV
-    python main.py visualise                            # построить графики из results CSV
-    python main.py visualise --csv results/fairness_benchmark.csv
+Usage:
+    python main.py run        --config <path> [--seed N] [--time N] [--instance S] [--output P]
+    python main.py benchmark  --config <path> [--seed N] [--time N] [--instance S] [--output P]
+    python main.py visualize  <path>
+    python main.py compare    <bench1> <bench2> ... [--output P]
 """
+from __future__ import annotations
 
 import argparse
-from enum import Enum
+from pathlib import Path
 
 
-class Algorithm(Enum):
-    HGS_SIMPLE = 'hgs_simple'
-    HGS_REBALANCE = 'hgs_rebalance'
-    HGS_RECTANGLE_SPLITTING = 'hgs_rs'
-    HGS_PENALTY = 'hgs_penalty'
-    HGS_ADAPTIVE = 'hgs_adaptive'
-    ALNS = 'alns'
-
-    def __str__(self):
-        return self.value
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=__doc__,
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="main.py",
+        description="VRP with fairness constraints — CLI dispatcher",
     )
-    subparsers = parser.add_subparsers(dest="command")
+    sub = p.add_subparsers(dest="command", required=True)
 
-    bench = subparsers.add_parser("benchmark", help="Run full benchmark")
-    bench.add_argument("--dataset", choices=["solomon", "yandex"], default="solomon")
-    bench.add_argument("--yandex-path", default="vrp_problems")
-    bench.add_argument("--algorithm", type=Algorithm, choices=list(Algorithm), default=Algorithm.HGS_REBALANCE)
-    bench.add_argument("--time", type=int, default=30)
-    bench.add_argument("--capacity", type=int, default=200)
-    bench.add_argument("--vehicles", type=int, default=25)
-    bench.add_argument("--max-cost-increase", type=float, default=8.0)
-    bench.add_argument("--rebalance-iters", type=int, default=5000)
-    bench.add_argument("--alns-iterations", type=int, default=25000)
-    bench.add_argument("--fairness-weight", type=float, default=100.0)
-    bench.add_argument("--fair-restarts", type=int, default=5)
-    bench.add_argument("--seed", type=int, default=42)
-    bench.add_argument("--output", default="results")
-    bench.add_argument("--route-balance", type=float, default=500.0)
-    bench.add_argument("--decay", type=float, default=0.9999)
-    bench.add_argument("--strategy", choices=["linear", "fairness_signal"], default="linear")
-    bench.add_argument("--min-weight", type=float, default=0.0)
-    bench.add_argument("--max-weight", type=float, default=1e9)
-    bench.add_argument("--update-every", type=int, default=1)
+    # ── run ──────────────────────────────────────────────────────────────
+    run_p = sub.add_parser("run", help="Single solver run from YAML config")
+    run_p.add_argument("--config", type=Path, required=True)
+    run_p.add_argument("--seed", type=int, default=None)
+    run_p.add_argument("--time", "--time-limit", dest="time_limit", type=int, default=None)
+    run_p.add_argument("--instance", type=str, default=None)
+    run_p.add_argument("--output", type=Path, default=None)
 
-    vis = subparsers.add_parser("visualise", help="Build charts from benchmark CSV")
-    vis.add_argument("--csv", default="results/fairness_benchmark.csv")
-    vis.add_argument("--output", default="visualization/output")
+    # ── benchmark ────────────────────────────────────────────────────────
+    bench_p = sub.add_parser("benchmark", help="Batch run from BenchmarkConfig YAML")
+    bench_p.add_argument("--config", type=Path, required=True)
+    bench_p.add_argument("--seed", type=int, default=None)
+    bench_p.add_argument("--time", "--time-limit", dest="time_limit", type=int, default=None)
+    bench_p.add_argument("--instance", type=str, default=None)
+    bench_p.add_argument("--output", type=Path, default=None)
 
-    parser.add_argument("--instance", default="R101")
-    parser.add_argument("--algorithm", type=Algorithm, choices=list(Algorithm))
-    parser.add_argument("--time", type=int, default=30)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--capacity", type=int, default=200)
-    parser.add_argument("--vehicles", type=int, default=25)
-    parser.add_argument("--max-cost-increase", type=float, default=5.0)
-    parser.add_argument("--rebalance-iters", type=int, default=3000)
-    parser.add_argument("--alns-iterations", type=int, default=25000)
-    parser.add_argument("--fairness-weight", type=float, default=100.0)
-    parser.add_argument("--fair-restarts", type=int, default=5)
-    parser.add_argument("--route-balance", type=float, default=500.0)
-    parser.add_argument("--decay", type=float, default=0.9999)
-    parser.add_argument("--strategy", choices=["linear", "fairness_signal"], default="linear")
-    parser.add_argument("--trace", action="store_true",
-                        help="Save per-iteration adaptive trace CSV to results/")
-    parser.add_argument("--trace-dir", default="results",
-                        help="Directory for trace CSV (default: results)")
-    parser.add_argument("--target-cv", type=float, default=0.2,
-                        help="FS: CV target (default: 0.2)")
-    parser.add_argument("--hold-band", type=float, default=0.05,
-                        help="FS: band around target_cv (default: 0.05)")
-    parser.add_argument("--boost-multiplier", type=float, default=1.05,
-                        help="FS: weight boost factor (default: 1.05)")
-    parser.add_argument("--decay-multiplier", type=float, default=0.995,
-                        help="FS: weight decay factor (default: 0.995)")
-    parser.add_argument("--min-weight", type=float, default=0.0,
-                        help="Min adaptive weight (default: 0.0)")
-    parser.add_argument("--max-weight", type=float, default=1e9,
-                        help="Max adaptive weight (default: 1e9)")
+    # ── visualize ────────────────────────────────────────────────────────
+    vis_p = sub.add_parser("visualize", help="Generate plots for a run or benchmark directory")
+    vis_p.add_argument("path", type=Path)
 
-    args = parser.parse_args()
+    # ── compare ──────────────────────────────────────────────────────────
+    cmp_p = sub.add_parser("compare", help="Compare metrics across multiple benchmarks")
+    cmp_p.add_argument("paths", type=Path, nargs="+")
+    cmp_p.add_argument("--output", type=Path, default=None)
 
-    if args.command == "benchmark":
-        from scripts.run_benchmark import run_benchmark
-        run_benchmark(args)
-    elif args.command == "visualise":
-        from scripts.run_visualise import run_visualise
-        run_visualise(args)
-    elif args.algorithm == Algorithm.ALNS:
-        from scripts.run_alns import run_alns
-        run_alns(args)
-    elif args.algorithm == Algorithm.HGS_REBALANCE:
-        from scripts.run_hgs import run_fairness_rebalance
-        run_fairness_rebalance(args)
-    elif args.algorithm == Algorithm.HGS_RECTANGLE_SPLITTING:
-        from scripts.run_hgs_rs import run_hgs_rs
-        run_hgs_rs(args)
-    elif args.algorithm == Algorithm.HGS_PENALTY:
-        from scripts.run_hgs_penalty import run_hgs_penalty
-        run_hgs_penalty(args)
-    elif args.algorithm == Algorithm.HGS_ADAPTIVE:
-        from scripts.run_hgs_adaptive import run_hgs_adaptive
-        run_hgs_adaptive(args)
-    elif args.algorithm == Algorithm.HGS_SIMPLE:
-        from scripts.run_hgs import run_simple
-        run_simple(args)
-    else:
-        raise Exception("--algorithm is required")
+    # ── spb-map ───────────────────────────────────────────────────────────
+    spb_p = sub.add_parser("spb-map", help="Solve SPb instance and draw Folium map")
+    spb_p.add_argument("--load-json", type=Path, default=None)
+    spb_p.add_argument("--algorithm", default="hgs_rebalance")
+    spb_p.add_argument("--time", type=int, default=30)
+    spb_p.add_argument("--vehicles", type=int, default=10)
+    spb_p.add_argument("--capacity", type=int, default=None)
+    spb_p.add_argument("--seed", type=int, default=42)
+    spb_p.add_argument("--output-map", type=Path, default=Path("map_results.html"))
+    spb_p.add_argument("--save-run", action="store_true")
+
+    return p
+
+
+def main() -> None:
+    args = _parser().parse_args()
+
+    if args.command == "run":
+        from runtime.cli.run_command import cmd_run
+        cmd_run(
+            args.config,
+            seed=args.seed,
+            time_limit=args.time_limit,
+            instance=args.instance,
+            output=args.output,
+        )
+
+    elif args.command == "benchmark":
+        from runtime.cli.benchmark_command import cmd_benchmark
+        cmd_benchmark(
+            args.config,
+            seed=args.seed,
+            time_limit=args.time_limit,
+            instance=args.instance,
+            output=args.output,
+        )
+
+    elif args.command == "visualize":
+        from runtime.cli.visualize_command import cmd_visualize
+        cmd_visualize(args.path)
+
+    elif args.command == "compare":
+        from runtime.cli.compare_command import cmd_compare
+        cmd_compare(args.paths, output=args.output)
+
+    elif args.command == "spb-map":
+        from scripts.run_spb_map import cmd_spb_map
+        cmd_spb_map(
+            load_json=args.load_json,
+            algorithm=args.algorithm,
+            time_limit=args.time,
+            vehicles=args.vehicles,
+            capacity=args.capacity,
+            seed=args.seed,
+            output_map=args.output_map,
+            save_run=args.save_run,
+        )
 
 
 if __name__ == "__main__":

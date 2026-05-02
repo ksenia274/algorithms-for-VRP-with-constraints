@@ -8,7 +8,7 @@ def build_solver(config: SolverConfig):
 
     Raises ValueError for unknown algorithm names.
     """
-    match config.algorithm:
+    match config.algorithm_type:
         case "hgs_simple":
             from algorithms.hgs_solver_simple import HGSSolverSimple
             return HGSSolverSimple(config)
@@ -25,4 +25,4 @@ def build_solver(config: SolverConfig):
             from algorithms.alns_solver import ALNSSolver
             return ALNSSolver(config)
         case _:
-            raise ValueError(f"Unknown algorithm: '{config.algorithm}'")
+            raise ValueError(f"Unknown algorithm_type: '{config.algorithm_type}'")

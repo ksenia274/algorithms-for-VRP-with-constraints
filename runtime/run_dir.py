@@ -47,7 +47,7 @@ def save_run(result: SolverResult, run_dir: Path) -> None:
 
     save_config_yaml(result.config, run_dir / "config.yaml")
     save_result_json(result, run_dir / "result.json")
-    append_metrics_row(result, run_dir / "metrics.csv")
+    append_metrics_row(result, run_dir / "metrics.csv", run_dir=run_dir)
     _write_routes_txt(result, run_dir / "routes.txt")
 
 

@@ -19,14 +19,19 @@ class SolverConfig:
     """Immutable description of a single solver run."""
 
     schema_version: str
-    algorithm: str
+    algorithm: str       # display name for CSV/plots (may equal algorithm_type)
     instance: str
-    instance_kind: str  # "yandex" | "solomon"
+    instance_kind: str   # "yandex" | "solomon"
     time_limit: int
     seed: int
     capacity: int
     num_vehicles: int
     algorithm_params: BaseModel
+    algorithm_type: str = ""  # type key for factory dispatch; defaults to algorithm
+
+    def __post_init__(self) -> None:
+        if not self.algorithm_type:
+            object.__setattr__(self, "algorithm_type", self.algorithm)
 
     def to_yaml(self) -> str:
         d = {
@@ -40,6 +45,8 @@ class SolverConfig:
             "num_vehicles": self.num_vehicles,
             "algorithm_params": self.algorithm_params.model_dump(),
         }
+        if self.algorithm_type != self.algorithm:
+            d["algorithm_type"] = self.algorithm_type
         return yaml.dump(d, sort_keys=False, allow_unicode=True)
 
     @classmethod
@@ -47,9 +54,10 @@ class SolverConfig:
         from algorithms.algorithm_params import ALGORITHM_PARAMS_REGISTRY
         d = yaml.safe_load(text)
         algorithm = d["algorithm"]
-        params_cls = ALGORITHM_PARAMS_REGISTRY.get(algorithm)
+        algorithm_type = d.get("algorithm_type") or algorithm
+        params_cls = ALGORITHM_PARAMS_REGISTRY.get(algorithm_type)
         if params_cls is None:
-            raise ValueError(f"Unknown algorithm '{algorithm}' in ALGORITHM_PARAMS_REGISTRY")
+            raise ValueError(f"Unknown algorithm_type '{algorithm_type}' in ALGORITHM_PARAMS_REGISTRY")
         params = params_cls.model_validate(d.get("algorithm_params") or {})
         return cls(
             schema_version=d.get("schema_version", "1.0"),
@@ -61,6 +69,7 @@ class SolverConfig:
             capacity=int(d["capacity"]),
             num_vehicles=int(d["num_vehicles"]),
             algorithm_params=params,
+            algorithm_type=algorithm_type,
         )
 
     def content_hash(self) -> str:

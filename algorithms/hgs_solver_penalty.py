@@ -6,9 +6,7 @@ import numpy as np
 import pyvrp
 import pyvrp.stop
 
-# TODO(fork): move ActivityType, Route, Solution to public API in PyVRP fork
-from pyvrp import Solution
-from pyvrp._pyvrp import ActivityType, Route
+from pyvrp import ActivityType, Route, Solution
 
 from algorithms.algorithm_params import HgsPenaltyParams
 from algorithms.hgs_base import HGSBase

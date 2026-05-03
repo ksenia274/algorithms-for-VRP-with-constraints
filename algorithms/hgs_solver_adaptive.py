@@ -39,12 +39,7 @@ def _solve_with_weighted_objective(
     collect_stats: bool,
     display: bool,
     params: SolveParams,
-    objective: AdaptiveObjective,
 ):
-    """Mirror of pyvrp.solve.solve() with a monkey-patched PenaltyManager.
-
-    # TODO(fork): replace monkey-patch when PyVRP fork exposes set_custom_weights publicly
-    """
     rng = RandomNumberGenerator(seed=seed)
     neighbours = compute_neighbours(data, params.neighbourhood)
     perturbation = PerturbationManager(params.perturbation)
@@ -56,17 +51,6 @@ def _solve_with_weighted_objective(
 
     penalties = params.penalty.midpoint_penalties(data)
     pm = PenaltyManager(penalties, params.penalty)
-
-    # THE FIX: wrap cost_evaluator() so every new CE gets current weights.
-    # TODO(fork): replace monkey-patch when PyVRP fork exposes set_custom_weights publicly
-    _orig_ce = pm.cost_evaluator
-
-    def _weighted_ce():
-        ce = _orig_ce()
-        objective.weights.apply_to(ce)
-        return ce
-
-    pm.cost_evaluator = _weighted_ce
 
     random = Solution.make_random(data, rng)
     init = ls(random, pm.max_cost_evaluator(), exhaustive=True)
@@ -218,7 +202,6 @@ class HGSSolverAdaptive(HGSBase):
             collect_stats=True,
             display=False,
             params=SolveParams(ils=IteratedLocalSearchParams(callbacks=_Callback())),
-            objective=objective,
         )
 
         weight_applied_count = objective.iteration // p.update_every if p.update_every else 0

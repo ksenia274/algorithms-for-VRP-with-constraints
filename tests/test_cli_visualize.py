@@ -65,6 +65,19 @@ def test_cmd_visualize_run_smoke(tmp_results_dir):
     cmd_visualize(run_dir)
 
 
+def test_cmd_visualize_run_creates_plots(tmp_results_dir):
+    inst = _find_yandex_instance_name()
+    if inst is None:
+        pytest.skip("No yandex instances found on disk")
+
+    run_dir = _simple_run(tmp_results_dir, inst)
+    cmd_visualize(run_dir)
+
+    plots_dir = run_dir / "plots"
+    pngs = list(plots_dir.glob("*.png"))
+    assert len(pngs) > 0, "No PNGs created in single-run plots/"
+
+
 def test_cmd_visualize_benchmark_smoke(tmp_results_dir):
     inst = _find_yandex_instance_name()
     if inst is None:
@@ -74,7 +87,7 @@ def test_cmd_visualize_benchmark_smoke(tmp_results_dir):
     cmd_visualize(bench_dir)
 
 
-def test_cmd_visualize_benchmark_creates_four_pngs(tmp_results_dir):
+def test_cmd_visualize_benchmark_creates_structure(tmp_results_dir):
     inst = _find_yandex_instance_name()
     if inst is None:
         pytest.skip("No yandex instances found on disk")
@@ -83,8 +96,21 @@ def test_cmd_visualize_benchmark_creates_four_pngs(tmp_results_dir):
     cmd_visualize(bench_dir)
 
     plots_dir = bench_dir / "plots"
-    pngs = list(plots_dir.glob("*.png"))
-    assert len(pngs) == 4, f"Expected 4 PNGs, got {[p.name for p in pngs]}"
+    agg_dir   = plots_dir / "aggregated"
+    pi_dir    = plots_dir / "per_instance"
+
+    assert agg_dir.is_dir(), "aggregated/ not created"
+    assert pi_dir.is_dir(),  "per_instance/ not created"
+
+    # aggregated must have at least 01/02/03/04
+    agg_pngs = list(agg_dir.glob("*.png"))
+    assert len(agg_pngs) >= 4, f"Expected ≥4 PNGs in aggregated/, got {[p.name for p in agg_pngs]}"
+
+    # per_instance must have subdirectories for each Pareto/profile plot
+    pi_subdirs = [p for p in pi_dir.iterdir() if p.is_dir()]
+    assert len(pi_subdirs) >= 3, (
+        f"Expected ≥3 per_instance/ subdirs, got {[p.name for p in pi_subdirs]}"
+    )
 
 
 def test_cmd_visualize_invalid_path(tmp_results_dir):

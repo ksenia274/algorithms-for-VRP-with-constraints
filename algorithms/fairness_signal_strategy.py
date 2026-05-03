@@ -96,8 +96,6 @@ class FairnessSignalAdjustment(AdaptationStrategy):
         new_w = ObjectiveWeights(
             vehicle_count=weights.vehicle_count,
             route_balance=_adj(weights.route_balance),
-            dist=weights.dist,
-            time=weights.time,
         )
         logger.debug(
             "iter=%d  state=%s  cv=%.4f  w_rb: %.1f→%.1f",

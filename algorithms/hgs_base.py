@@ -3,8 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pyvrp
 
-# TODO(fork): move ActivityType to public API in PyVRP fork
-from pyvrp._pyvrp import ActivityType
+from pyvrp import ActivityType
 
 from algorithms.solver_result import SolverConfig, SolverResult, SolverDiagnostics
 from data.vrp_instance import VRPInstanceInput, load_instance_input

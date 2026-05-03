@@ -30,7 +30,7 @@ def run_hgs_rs(args):
     rs_solver = RSSolver[SolverResult](DurationAdapter(hgs_simple), time_limit=args.time, max_workers=args.num_threads)
     max_total_distance = 10000
     pareto_frontier = rs_solver.solve(args.instance, max_obj1=max_total_distance, min_obj2=0)
-    sol = min(pareto_frontier, key=lambda s: s.fairness.fairness_score)
+    sol = min(pareto_frontier, key=lambda s: s.fairness.distance.worst_ratio)
 
     print(f"Feasible:       {sol.feasible}")
     print(f"Total distance: {sol.total_distance}")

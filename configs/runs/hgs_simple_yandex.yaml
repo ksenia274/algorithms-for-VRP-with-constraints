@@ -1,0 +1,9 @@
+schema_version: "1.0"
+algorithm: hgs_simple
+instance: "03"
+instance_kind: yandex
+time_limit: 30
+seed: 42
+capacity: 200
+num_vehicles: 25
+algorithm_params: {}

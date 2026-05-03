@@ -1,4 +1,5 @@
 import math
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -8,11 +9,15 @@ from alns.select import RouletteWheel
 from alns.State import State
 from alns.stop import MaxRuntime
 
-from algorithms.solver_result import SolverResult
+from algorithms.algorithm_params import AlnsParams
+from algorithms.solver_result import SolverConfig, SolverDiagnostics, SolverResult
 from data.vrp_instance import VRPInstanceInput, load_instance_input
 
 
 UNASSIGNED_PENALTY = 1_000_000
+_ROULETTE_SCORES = [5, 2, 1, 0.5]
+_ROULETTE_DECAY = 0.8
+_SA_SCALE_DIVISOR = 10_000.0
 
 
 @dataclass
@@ -215,13 +220,11 @@ def _best_insertion(route, client, data, load=None, deps=None):
 
 def _build_initial_solution(data):
     clients = sorted(range(1, data.n_clients + 1), key=lambda c: data.tw_early[c])
-
     routes, route_loads, route_deps = [], [], []
     unassigned = []
 
     for client in clients:
         best_r, best_pos, best_cost = None, None, float("inf")
-
         for ri, route in enumerate(routes):
             result = _best_insertion(route, client, data, load=route_loads[ri], deps=route_deps[ri])
             if result is not None:
@@ -230,7 +233,6 @@ def _build_initial_solution(data):
                     best_cost = cost
                     best_pos = pos
                     best_r = ri
-
         if best_r is not None:
             routes[best_r].insert(best_pos, client)
             route_loads[best_r] += data.demands[client]
@@ -293,35 +295,27 @@ def shaw_removal(state, rng):
     n_remove = _n_to_remove(state, rng)
     dm = state.data.dm
     data = state.data
-
     all_clients = [c for route in state.routes for c in route]
     if not all_clients:
         return state
-
     seed_client = all_clients[int(rng.integers(0, len(all_clients)))]
     max_dist = max(dm[seed_client]) or 1
     max_demand = max(data.demands) or 1
     tw_range = max(1, max(data.tw_late) - min(data.tw_early))
-
-    relatedness = sorted(
+    relatedness = sorted((
         (
-            (
-                dm[seed_client][c] / max_dist
-                + abs(data.tw_early[c] - data.tw_early[seed_client]) / tw_range
-                + abs(data.demands[c] - data.demands[seed_client]) / max_demand,
-                c,
-            )
-            for c in all_clients
-            if c != seed_client
+            dm[seed_client][c] / max_dist
+            + abs(data.tw_early[c] - data.tw_early[seed_client]) / tw_range
+            + abs(data.demands[c] - data.demands[seed_client]) / max_demand,
+            c,
         )
-    )
-
+        for c in all_clients if c != seed_client
+    ))
     to_remove = {seed_client}
     for _, client in relatedness:
         if len(to_remove) >= n_remove:
             break
         to_remove.add(client)
-
     state.routes = [r for r in ([c for c in r if c not in to_remove] for r in state.routes) if r]
     state.unassigned.extend(to_remove)
     return state
@@ -331,14 +325,11 @@ def greedy_repair(state, rng):
     state = state.copy()
     data = state.data
     shuffled = [state.unassigned[i] for i in rng.permutation(len(state.unassigned))]
-
     loads = [sum(data.demands[c] for c in r) for r in state.routes]
     deps = [_compute_departures(r, data) for r in state.routes]
-
     still_unassigned = []
     for client in shuffled:
         best_r, best_pos, best_cost = None, None, float("inf")
-
         for ri, route in enumerate(state.routes):
             result = _best_insertion(route, client, data, load=loads[ri], deps=deps[ri])
             if result is not None:
@@ -347,7 +338,6 @@ def greedy_repair(state, rng):
                     best_cost = cost
                     best_pos = pos
                     best_r = ri
-
         if best_r is not None:
             state.routes[best_r].insert(best_pos, client)
             loads[best_r] += data.demands[client]
@@ -358,7 +348,6 @@ def greedy_repair(state, rng):
             deps.append(_compute_departures([client], data))
         else:
             still_unassigned.append(client)
-
     state.unassigned = still_unassigned
     return state
 
@@ -366,14 +355,11 @@ def greedy_repair(state, rng):
 def regret_2_repair(state, rng):
     state = state.copy()
     data = state.data
-
     loads = [sum(data.demands[c] for c in r) for r in state.routes]
     deps = [_compute_departures(r, data) for r in state.routes]
-
     while state.unassigned:
         best_client, best_route_idx, best_pos = None, None, None
         max_regret = -float("inf")
-
         for client in state.unassigned:
             insertions = []
             for ri, route in enumerate(state.routes):
@@ -381,24 +367,18 @@ def regret_2_repair(state, rng):
                 if result is not None:
                     pos, cost = result
                     insertions.append((cost, ri, pos))
-
             if len(state.routes) < data.num_vehicles:
                 insertions.append((0, -1, 0))
-
             if not insertions:
                 continue
-
             insertions.sort()
             regret = UNASSIGNED_PENALTY if len(insertions) == 1 else insertions[1][0] - insertions[0][0]
-
             if regret > max_regret:
                 max_regret = regret
                 best_client = client
                 _, best_route_idx, best_pos = insertions[0]
-
         if best_client is None:
             break
-
         state.unassigned.remove(best_client)
         if best_route_idx == -1:
             state.routes.append([best_client])
@@ -408,51 +388,39 @@ def regret_2_repair(state, rng):
             state.routes[best_route_idx].insert(best_pos, best_client)
             loads[best_route_idx] += data.demands[best_client]
             deps[best_route_idx] = _compute_departures(state.routes[best_route_idx], data)
-
     return state
 
 
 class ALNSSolver:
-    def __init__(
-        self,
-        time_limit: int = 60,
-        seed: int = 0,
-        vehicle_capacity: int = 200,
-        num_vehicles: int = 25,
-        enable_fairness: bool = False,
-        fairness_weight: float = 100.0,
-        max_iterations: int = 25000,
-        sa_start_temp: float = 100.0,
-        sa_end_temp: float = 0.5,
-    ):
-        self.time_limit = time_limit
-        self.seed = seed
-        self.vehicle_capacity = vehicle_capacity
-        self.num_vehicles = num_vehicles
-        self.enable_fairness = enable_fairness
-        self.fairness_weight = fairness_weight
-        self.max_iterations = max_iterations
-        self.sa_start_temp = sa_start_temp
-        self.sa_end_temp = sa_end_temp
+    """Adaptive Large Neighbourhood Search solver with SA acceptance."""
+
+    def __init__(self, config: SolverConfig) -> None:
+        if not isinstance(config.algorithm_params, AlnsParams):
+            raise TypeError(f"Expected AlnsParams, got {type(config.algorithm_params)}")
+        self.config = config
+        self.params: AlnsParams = config.algorithm_params
 
     def solve(self, instance_name: str | VRPInstanceInput) -> SolverResult:
+        t0 = time.perf_counter()
+        p = self.params
+        cfg = self.config
+
         data = _parse_instance(
             instance_name,
-            self.vehicle_capacity,
-            self.num_vehicles,
-            self.enable_fairness,
-            self.fairness_weight,
+            cfg.capacity,
+            cfg.num_vehicles,
+            p.enable_fairness,
+            p.fairness_weight,
         )
 
-        initial = _build_initial_solution(data)
+        initial_state = _build_initial_solution(data)
+        init_obj = initial_state._total_distance() or 1.0
+        scale = init_obj / _SA_SCALE_DIVISOR
+        start_temp = max(p.sa_start_temp, p.sa_start_temp * scale)
+        end_temp = max(p.sa_end_temp, p.sa_end_temp * scale)
+        sa_step = (end_temp / start_temp) ** (1.0 / p.max_iterations)
 
-        init_obj = initial._total_distance() or 1.0
-        scale = init_obj / 10_000.0
-        start_temp = max(self.sa_start_temp, self.sa_start_temp * scale)
-        end_temp = max(self.sa_end_temp, self.sa_end_temp * scale)
-        sa_step = (end_temp / start_temp) ** (1.0 / self.max_iterations)
-
-        rng = np.random.default_rng(self.seed)
+        rng = np.random.default_rng(cfg.seed)
         alns = ALNS(rng)
         alns.add_destroy_operator(random_removal, name="random_removal")
         alns.add_destroy_operator(worst_removal, name="worst_removal")
@@ -461,19 +429,29 @@ class ALNSSolver:
         alns.add_repair_operator(regret_2_repair, name="regret_2_repair")
 
         result = alns.iterate(
-            initial,
-            RouletteWheel(scores=[5, 2, 1, 0.5], decay=0.8, num_destroy=3, num_repair=2),
+            initial_state,
+            RouletteWheel(scores=_ROULETTE_SCORES, decay=_ROULETTE_DECAY, num_destroy=3, num_repair=2),
             SimulatedAnnealing(start_temperature=start_temp, end_temperature=end_temp, step=sa_step),
-            MaxRuntime(self.time_limit),
+            MaxRuntime(cfg.time_limit),
         )
 
+        solve_time = time.perf_counter() - t0
         best = result.best_state
+
+        diagnostics = SolverDiagnostics(
+            solve_time_s=solve_time,
+            iterations=p.max_iterations,
+        )
+
         if best.unassigned:
-            return SolverResult.infeasible()
+            return SolverResult.infeasible(config=cfg, diagnostics=diagnostics)
 
         routes = [list(r) for r in best.routes]
         return SolverResult.from_routes(
             routes=routes,
             distance_matrix=data.dm,
             loc_loads=data.demands,
+            feasible=True,
+            config=cfg,
+            diagnostics=diagnostics,
         )

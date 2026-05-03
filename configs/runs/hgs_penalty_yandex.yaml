@@ -1,0 +1,12 @@
+schema_version: "1.0"
+algorithm: hgs_penalty
+instance: "03"
+instance_kind: yandex
+time_limit: 30
+seed: 42
+capacity: 200
+num_vehicles: 25
+algorithm_params:
+  fairness_weight: 0.3
+  num_restarts: 5
+  max_cost_increase_pct: 5.0

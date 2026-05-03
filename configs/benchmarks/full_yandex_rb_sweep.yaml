@@ -1,0 +1,61 @@
+name: full_yandex_rb_sweep
+description: "Sweep по initial_route_balance для adaptive (rb=500/5000/50000, 26 инстансов)."
+
+instances:
+  - {name: "0",  kind: yandex}
+  - {name: "1",  kind: yandex}
+  - {name: "2",  kind: yandex}
+  - {name: "3",  kind: yandex}
+  - {name: "4",  kind: yandex}
+  - {name: "5",  kind: yandex}
+  - {name: "6",  kind: yandex}
+  - {name: "7",  kind: yandex}
+  - {name: "8",  kind: yandex}
+  - {name: "9",  kind: yandex}
+  - {name: "10", kind: yandex}
+  - {name: "11", kind: yandex}
+  - {name: "12", kind: yandex}
+  - {name: "13", kind: yandex}
+  - {name: "14", kind: yandex}
+  - {name: "15", kind: yandex}
+  - {name: "16", kind: yandex}
+  - {name: "17", kind: yandex}
+  - {name: "18", kind: yandex}
+  - {name: "19", kind: yandex}
+  - {name: "20", kind: yandex}
+  - {name: "21", kind: yandex}
+  - {name: "22", kind: yandex}
+  - {name: "23", kind: yandex}
+  - {name: "24", kind: yandex}
+  - {name: "25", kind: yandex}
+
+algorithms:
+  - name: adaptive_rb_500
+    type: hgs_adaptive
+    algorithm_params:
+      initial_route_balance: 500.0
+      strategy: linear
+      decay: 0.99999
+      trace: false
+
+  - name: adaptive_rb_5000
+    type: hgs_adaptive
+    algorithm_params:
+      initial_route_balance: 5000.0
+      strategy: linear
+      decay: 0.99999
+      trace: false
+
+  - name: adaptive_rb_50000
+    type: hgs_adaptive
+    algorithm_params:
+      initial_route_balance: 50000.0
+      strategy: linear
+      decay: 0.99999
+      trace: false
+
+shared:
+  time_limit: 30
+  seed: 42
+  capacity: 200
+  num_vehicles: 25

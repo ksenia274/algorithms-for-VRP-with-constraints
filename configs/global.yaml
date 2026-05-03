@@ -1,0 +1,17 @@
+metrics:
+  primary: dist_worst_ratio
+  secondary:
+    - dist_gini
+
+paths:
+  results: results
+  archive: results/archive
+  data_yandex: data/yandex
+  data_yandex_external: ../Fair_VRP_ala_Yandex/vrp_problems
+  data_solomon: data/solomon
+
+defaults:
+  time_limit: 30
+  seed: 42
+  capacity: 200
+  num_vehicles: 25

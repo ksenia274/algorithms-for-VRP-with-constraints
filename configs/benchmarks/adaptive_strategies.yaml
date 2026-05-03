@@ -1,0 +1,35 @@
+name: adaptive_strategies
+description: "Сравнение стратегий adaptive: linear decay vs fairness_signal."
+
+instances:
+  - {name: "0", kind: yandex}
+  - {name: "1", kind: yandex}
+  - {name: "3", kind: yandex}
+  - {name: "5", kind: yandex}
+  - {name: "7", kind: yandex}
+
+algorithms:
+  - name: adaptive_linear
+    type: hgs_adaptive
+    algorithm_params:
+      initial_route_balance: 500.0
+      strategy: linear
+      decay: 0.99999
+      trace: true
+
+  - name: adaptive_fairness_signal
+    type: hgs_adaptive
+    algorithm_params:
+      initial_route_balance: 500.0
+      strategy: fairness_signal
+      target_cv: 0.2
+      hold_band: 0.05
+      boost_factor: 1.05
+      fs_decay_factor: 0.995
+      trace: true
+
+shared:
+  time_limit: 30
+  seed: 42
+  capacity: 200
+  num_vehicles: 25

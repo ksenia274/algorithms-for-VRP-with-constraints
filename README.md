@@ -37,10 +37,6 @@
 #### Linux
 
 ```bash
-# Системные зависимости (один раз)
-sudo apt install python3.12 python3.12-venv build-essential git
-
-# Создать окружение и установить всё
 python3.12 -m venv venv
 source venv/bin/activate
 pip install poetry-core meson ninja docblock
@@ -56,162 +52,109 @@ python -m venv venv
 install_fork.bat
 ```
 
-`install_fork.bat` активирует окружение MSVC и выполняет `pip install -r requirements.txt --no-build-isolation`.
-
 ---
 
 ### Датасеты
 
-**Solomon VRPTW** — стандартный бенчмарк, 56 инстансов (R1/R2/C1/C2/RC1/RC2). Скачивается автоматически через kagglehub:
-- https://www.kaggle.com/datasets/masud7866/solomon-vrptw-benchmark
+**Solomon VRPTW** — стандартный бенчмарк, 56 инстансов (R1/R2/C1/C2/RC1/RC2). Скачивается автоматически через kagglehub.
 
 **Yandex VRP** — реальные инстансы задачи обслуживания самокатов:
+
 ```bash
 git clone https://github.com/Stephic-Hardy/Fair_VRP_ala_Yandex
 ```
+
+Клонируйте рядом с этим репозиторием (в `../Fair_VRP_ala_Yandex/`).
 
 ---
 
 ### Алгоритмы
 
-| `--algorithm` | Описание |
+| Алгоритм | Описание |
 |---|---|
 | `hgs_simple` | HGS без fairness-постобработки |
-| `hgs_rebalance` | HGS + ребалансировка маршрутов (relocate/swap) для улучшения fairness |
-| `hgs_rs` | HGS + rectangle splitting — исследование фронта Парето по (distance, max\_duration) |
+| `hgs_rebalance` | HGS + ребалансировка маршрутов (relocate/swap) |
 | `hgs_penalty` | HGS с итеративными рестартами и штрафной матрицей расстояний |
-| `hgs_adaptive` | HGS + адаптивные веса (route\_balance) прямо в ILS через форк PyVRP |
+| `hgs_adaptive` | HGS + адаптивные веса route\_balance в ILS (форк PyVRP) |
 | `alns` | ALNS с fairness-штрафом в целевой функции |
 
 ---
 
-### Запуск
-
-#### Одиночный инстанс
+### Быстрый старт
 
 ```bash
-# Yandex
-python main.py --algorithm hgs_rebalance --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
-python main.py --algorithm hgs_penalty   --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
-python main.py --algorithm hgs_adaptive  --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
-python main.py --algorithm alns          --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+# Одиночный запуск
+python main.py run --config configs/runs/hgs_adaptive_yandex.yaml
 
-# Solomon
-python main.py --algorithm hgs_rebalance --instance R101
+# Бенчмарк нескольких алгоритмов × нескольких инстансов
+python main.py benchmark --config configs/benchmarks/compare_three_methods.yaml
+
+# Визуализация результатов бенчмарка
+python main.py visualize results/benchmarks/<name>/
+
+# Сравнение двух бенчмарков
+python main.py compare results/benchmarks/bench_a/ results/benchmarks/bench_b/
+
+# Карта маршрутов СПб
+python main.py spb-map --load-json ../Fair_VRP_ala_Yandex/vrp_problems/3.json --algorithm hgs_adaptive
 ```
 
-#### Бенчмарк (все инстансы → CSV)
+Override-флаги (`--seed`, `--time`, `--instance`) применяются поверх YAML:
 
 ```bash
-# Solomon, hgs_rebalance (по умолчанию)
-python main.py benchmark
-
-# Solomon, ALNS
-python main.py benchmark --algorithm alns
-
-# Yandex
-python main.py benchmark --dataset yandex --yandex-path ../Fair_VRP_ala_Yandex/vrp_problems
+python main.py run --config configs/runs/hgs_simple_yandex.yaml --seed 7 --time 60 --instance 5
 ```
-
-Результаты сохраняются в `results/fairness_benchmark.csv`.
-
-#### Визуализация результатов бенчмарка
-
-```bash
-# Из дефолтного CSV
-python main.py visualise
-
-# Из произвольного CSV
-python main.py visualise --csv results/fairness_benchmark.csv --output visualization/output
-```
-
-Строятся четыре графика в `visualization/output/`:
-
-| Файл | Содержание |
-|---|---|
-| `01_gini_before_after.png` | Gini до и после ребалансировки по каждому инстансу |
-| `02_category_summary.png` | Средние Gini, CV, fairness score, Gini нагрузки по категориям Solomon |
-| `03_metric_heatmap.png` | Тепловая карта fairness-метрик по инстансам |
-| `04_rebalance_moves.png` | Число ходов ребалансировки по инстансам |
-
-#### Маршруты на карте Санкт-Петербурга
-
-```bash
-# HGS + fairness rebalancing
-python scripts/run_spb_hgs.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
-
-# Prize-Collecting режим (клиенты необязательны, приоритет по point_scores)
-python scripts/run_spb_hgs.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json --prizes
-
-# HGS + адаптивные веса
-python scripts/run_spb_hgs_adaptive.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
-
-# HGS + штрафная матрица
-python scripts/run_spb_hgs_penalty.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
-
-# ALNS
-python scripts/run_spb_alns.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
-
-# Генерация синтетического инстанса и сохранение
-python scripts/run_spb_hgs.py --points 100 --save-json my_problem.json
-```
-
-Карта сохраняется в `visualization/map_results/` в формате HTML (Folium).
 
 ---
 
-### Параметры
+### Структура проекта
 
-#### `main.py`
+```
+algorithms/          # солверы и fairness-утилиты
+  factory.py         # build_solver(config) — единая точка входа
+  hgs_base.py        # базовый класс всех HGS-солверов
+  hgs_solver_*.py    # конкретные HGS-варианты
+  alns_solver.py     # ALNS
+  algorithm_params.py  # Pydantic-схемы параметров
+  solver_result.py   # SolverResult, SolverConfig, SolverDiagnostics
 
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| `--algorithm` | — | `hgs_simple` / `hgs_rebalance` / `hgs_rs` / `hgs_penalty` / `hgs_adaptive` / `alns` |
-| `--instance` | `R101` | Имя Solomon-инстанса или путь к `.json` |
-| `--time` | `30` | Лимит времени солвера (с) |
-| `--vehicles` | `25` | Число машин |
-| `--capacity` | `200` | Вместимость (для Yandex берётся из JSON) |
-| `--max-cost-increase` | `5.0` | Допустимый рост стоимости при ребалансировке (%) |
-| `--rebalance-iters` | `3000` | Итерации ребалансировки (`hgs_rebalance`) |
-| `--alns-iterations` | `25000` | Итерации ALNS |
-| `--fairness-weight` | `100.0` | Вес fairness в целевой функции ALNS |
-| `--seed` | `42` | Random seed |
+configs/
+  global.yaml        # пути, метрики по умолчанию
+  runs/              # YAML-конфиги одиночных запусков
+  benchmarks/        # YAML-конфиги бенчмарков
 
-#### `main.py benchmark` (дополнительные параметры)
+data/                # загрузчики инстансов
+metrics/             # metrics/fairness.py — FairnessReport, DimensionMetrics
 
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| `--algorithm` | `hgs_rebalance` | Алгоритм для прогона |
-| `--dataset` | `solomon` | `solomon` или `yandex` |
-| `--yandex-path` | `vrp_problems` | Путь к папке с JSON-инстансами |
-| `--max-cost-increase` | `8.0` | Допустимый рост стоимости (%) |
-| `--rebalance-iters` | `5000` | Итерации ребалансировки |
-| `--output` | `results` | Папка для сохранения CSV |
+runtime/             # инфраструктура сохранения и CLI
+  cli/               # команды run, benchmark, visualize, compare
+  global_config.py   # singleton из configs/global.yaml
+  run_dir.py         # create_run_dir, save_run, load_run
+  serialization.py   # JSON/YAML/CSV
 
-#### `run_spb_hgs.py`
+scripts/
+  run_spb_map.py     # СПб-инстанс + Folium-карта
+  run_hgs_rs.py      # Rectangle Splitting (код коллеги)
 
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| `--load-json` | — | Загрузить готовый JSON-инстанс |
-| `--save-json` | — | Сохранить сгенерированный инстанс |
-| `--points` | `50` | Число точек при генерации |
-| `--time` | `30` | Лимит времени (с) |
-| `--vehicles` | `10` | Число машин |
-| `--capacity` | из JSON | Вместимость |
-| `--output-map` | `map_results.html` | Путь к HTML-файлу карты |
-| `--no-fairness` | off | Отключить ребалансировку |
-| `--prizes` | off | Prize-Collecting: клиенты необязательны, приоритет по `point_scores` |
-| `--seed` | `42` | Random seed |
+visualization/
+  plots/             # pareto, dimensions, distribution, category_heatmap
+  compose.py         # plot_all(df, output_dir)
+  trace_plot.py      # трассировка adaptive-солвера
+  map_routes.py      # Folium-карта маршрутов
+
+tests/               # 53 теста, pytest
+```
 
 ---
 
 ### Метрики fairness
 
-Вычисляются по расстоянию, нагрузке и числу клиентов на маршрут:
+Вычисляются независимо по трём измерениям: **расстояние**, **нагрузка**, **число клиентов**.
 
-| Метрика | Описание |
-|---|---|
-| **Gini** | Коэффициент Джини (0 = равенство, 1 = максимальное неравенство) |
-| **Jain** | Индекс Джейна (1 = равенство) |
-| **CV** | Коэффициент вариации (std / mean) |
-| **Fairness score** | Взвешенная сумма CV: расстояния × 0.5 + нагрузка × 0.3 + клиенты × 0.2 |
+| Метрика | Формула | Интерпретация |
+|---|---|---|
+| `worst_ratio` | max / mean | Во сколько раз худший маршрут превышает средний. `1.0` = идеал |
+| `gini` | Σᵢⱼ\|xᵢ−xⱼ\| / (2·n·Σxᵢ) | `0.0` = все маршруты одинаковы |
+| `cv` | std / mean | Стандартный коэффициент вариации |
+
+Колонки в `metrics.csv`: `dist_worst_ratio`, `dist_gini`, `dist_cv`, `load_worst_ratio`, `load_gini`, `load_cv`, `clients_worst_ratio`, `clients_gini`, `clients_cv`.

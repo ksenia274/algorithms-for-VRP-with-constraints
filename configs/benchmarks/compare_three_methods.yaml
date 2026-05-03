@@ -1,0 +1,37 @@
+name: compare_three_methods
+description: "Сравнение HGS rebalance / penalty / adaptive на yandex-инстансах."
+
+instances:
+  - {name: "0", kind: yandex}
+  - {name: "1", kind: yandex}
+  - {name: "3", kind: yandex}
+  - {name: "5", kind: yandex}
+  - {name: "7", kind: yandex}
+
+algorithms:
+  - name: hgs_rebalance
+    type: hgs_rebalance
+    algorithm_params:
+      enable_fairness: true
+      max_cost_increase_pct: 5.0
+      rebalance_iterations: 3000
+
+  - name: hgs_penalty
+    type: hgs_penalty
+    algorithm_params:
+      fairness_weight: 0.3
+      num_restarts: 5
+
+  - name: hgs_adaptive_linear
+    type: hgs_adaptive
+    algorithm_params:
+      initial_route_balance: 500.0
+      strategy: linear
+      decay: 0.99999
+      trace: true
+
+shared:
+  time_limit: 30
+  seed: 42
+  capacity: 200
+  num_vehicles: 25

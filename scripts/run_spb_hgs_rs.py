@@ -7,7 +7,7 @@ import sys
 
 from spb_utils import generate_instance, problem_to_instance_input
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 BASE_COORDS = (60.00771529992149, 30.370180423873254)
 DISTRICT_NAME = "Kalininsky District, Saint Petersburg, Russia"
@@ -35,10 +35,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-map", default="map_results.html",
                         help="Output HTML map file (default: map_results.html)")
-    parser.add_argument("--no-fairness", action="store_true",
-                        help="Disable fairness rebalancing")
-    parser.add_argument("--prizes", action="store_true",
-                        help="Enable Prize-Collecting mode (clients optional, scored by point_scores)")
+    parser.add_argument("--num-threads", type=int, default=1)
     args = parser.parse_args()
 
     if args.load_json:
@@ -56,21 +53,25 @@ def main():
 
     inp = problem_to_instance_input(problem, capacity)
 
-    from algorithms.hgs_solver import HGSSolver
+    from algorithms.rectangle_splitting import RSSolver
+    from algorithms.hgs_solver_simple import HGSSolver
+    from algorithms.solver_result import SolverResult
+    from run_hgs_rs import DurationAdapter
 
-    print(f"\nRunning HGS  (time={args.time}s  vehicles={args.vehicles}"
-          f"  capacity={capacity}  fairness={'off' if args.no_fairness else 'on'}"
-          f"  prizes={'on' if args.prizes else 'off'}) ...")
+    print(f"\nRunning HGS with RS  (time={args.time}s  vehicles={args.vehicles}"
+          f"  capacity={capacity}  num-threads={args.num_threads}) ...")
 
-    solver = HGSSolver(
-        time_limit=args.time,
+    hgs_simple = HGSSolver(
+        time_limit=max(1, int(args.time / 10)),
         seed=args.seed,
         vehicle_capacity=capacity,
         num_vehicles=args.vehicles,
-        enable_fairness=not args.no_fairness,
-        use_prizes=args.prizes,
     )
-    _, sol = solver.solve(inp)
+
+    rs_solver = RSSolver[SolverResult](DurationAdapter(hgs_simple), time_limit=args.time, max_workers=args.num_threads)
+    max_total_distance = 10000
+    pareto_frontier = rs_solver.solve(inp, max_obj1=max_total_distance, min_obj2=0)
+    sol = min(pareto_frontier, key=lambda s: s.fairness.fairness_score)
 
     print(f"\nFeasible:        {sol.feasible}")
     print(f"Total distance:  {sol.total_distance}")

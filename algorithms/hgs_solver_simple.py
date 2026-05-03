@@ -6,14 +6,14 @@ import pyvrp.stop
 
 from algorithms.solver_result import SolverResult
 from data.load_solomon import load_instance
+from data.vrp_instance import load_instance_input
 
 
 class HGSSolver:
-    def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25, max_distance=None):
+    def __init__(self, time_limit=60, seed=0, vehicle_capacity=100, num_vehicles=25):
         self.time_limit = time_limit
         self.seed = seed
         self.vehicle_capacity = vehicle_capacity
-        self.max_distance = max_distance
         self.num_vehicles = num_vehicles
         self._cache_instance_name = None
         self._cache_df = None
@@ -25,12 +25,11 @@ class HGSSolver:
             self._cache_df = df
             self._cache_instance_name = instance_name
         return self._cache_df
-    
-    def set_max_distance(self, max_distance: float):
-        self.max_distance = max_distance
 
-    def solve(self, instance_name) -> SolverResult:
-        df = self._get_df(instance_name)
+    def solve(self, instance, max_distance: float = math.inf) -> SolverResult:
+        inp = load_instance_input(instance)
+        df = inp.df.copy()
+        df.columns = df.columns.str.strip()
 
         m = pyvrp.Model()
 
@@ -43,13 +42,13 @@ class HGSSolver:
             name="Depot",
         )
 
-        if self.max_distance and self.max_distance < math.inf:
+        if max_distance and max_distance < math.inf:
             m.add_vehicle_type(
                 num_available=self.num_vehicles,
                 capacity=[self.vehicle_capacity],
                 start_depot=depot,
                 end_depot=depot,
-                max_distance=int(self.max_distance),
+                max_distance=int(max_distance),
             )
         else: 
             m.add_vehicle_type(
@@ -70,10 +69,16 @@ class HGSSolver:
                 name=f"Client {int(row['CUST NO.'])}",
             )
 
-        for frm in m.locations:
-            for to in m.locations:
-                dist = int(math.hypot(frm.x - to.x, frm.y - to.y))
-                m.add_edge(frm, to, distance=dist, duration=dist)
+        locs = list(m.locations)
+        for i, frm in enumerate(locs):
+            for j, to in enumerate(locs):
+                dist = (
+                    int(inp.dist_matrix[i][j])
+                    if inp.dist_matrix is not None
+                    else int(math.hypot(frm.x - to.x, frm.y - to.y))
+                )
+                duration = int(inp.time_matrix[i][j]) if inp.time_matrix is not None else dist
+                m.add_edge(frm, to, distance=dist, duration=duration)
 
         result = m.solve(
             stop=pyvrp.stop.MaxRuntime(self.time_limit),

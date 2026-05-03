@@ -72,6 +72,9 @@ def main():
     parser.add_argument("--decay", type=float, default=0.9999)
     parser.add_argument("--strategy", choices=["linear", "adaptive"], default="linear")
     parser.add_argument("--target-feasibility", type=float, default=0.5)
+    parser.add_argument("--num-threads", type=int, default=1)
+    parser.add_argument("--plot-pareto", action="store_true",
+                        help="Plot found solutions and the pareto frontier for the RS algorithm")
 
     args = parser.parse_args()
 

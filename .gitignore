@@ -4,3 +4,10 @@ env/
 .vs/
 __pycache__/
 cache/
+
+# generated outputs
+install_log.txt
+map_results.html
+visualization/map_results/
+visualization/output/
+results/*.txt

@@ -3,6 +3,8 @@
     python main.py --algorithm hgs_simple               # простой HGS на одном инстансе
     python main.py --algorithm hgs_rebalance            # HGS + fairness rebalancing
     python main.py --algorithm hgs_rs                   # HGS + rectangle splitting
+    python main.py --algorithm hgs_penalty              # HGS + итеративная штрафная матрица расстояний
+    python main.py --algorithm hgs_adaptive             # HGS + адаптивные веса fairness прямо в ILS (форк PyVRP)
     python main.py --algorithm alns                     # ALNS solver с fairness
     python main.py benchmark                            # прогон на всех solomon инстансах и вывод в CSV
     python main.py visualise                            # построить графики из results CSV
@@ -17,6 +19,8 @@ class Algorithm(Enum):
     HGS_SIMPLE = 'hgs_simple'
     HGS_REBALANCE = 'hgs_rebalance'
     HGS_RECTANGLE_SPLITTING = 'hgs_rs'
+    HGS_PENALTY = 'hgs_penalty'
+    HGS_ADAPTIVE = 'hgs_adaptive'
     ALNS = 'alns'
 
     def __str__(self):
@@ -41,8 +45,13 @@ def main():
     bench.add_argument("--rebalance-iters", type=int, default=5000)
     bench.add_argument("--alns-iterations", type=int, default=25000)
     bench.add_argument("--fairness-weight", type=float, default=100.0)
+    bench.add_argument("--fair-restarts", type=int, default=5)
     bench.add_argument("--seed", type=int, default=42)
     bench.add_argument("--output", default="results")
+    bench.add_argument("--route-balance", type=float, default=500.0)
+    bench.add_argument("--decay", type=float, default=0.9999)
+    bench.add_argument("--strategy", choices=["linear", "adaptive"], default="linear")
+    bench.add_argument("--target-feasibility", type=float, default=0.5)
 
     vis = subparsers.add_parser("visualise", help="Build charts from benchmark CSV")
     vis.add_argument("--csv", default="results/fairness_benchmark.csv")
@@ -58,6 +67,11 @@ def main():
     parser.add_argument("--rebalance-iters", type=int, default=3000)
     parser.add_argument("--alns-iterations", type=int, default=25000)
     parser.add_argument("--fairness-weight", type=float, default=100.0)
+    parser.add_argument("--fair-restarts", type=int, default=5)
+    parser.add_argument("--route-balance", type=float, default=500.0)
+    parser.add_argument("--decay", type=float, default=0.9999)
+    parser.add_argument("--strategy", choices=["linear", "adaptive"], default="linear")
+    parser.add_argument("--target-feasibility", type=float, default=0.5)
     parser.add_argument("--num-threads", type=int, default=1)
     parser.add_argument("--plot-pareto", action="store_true",
                         help="Plot found solutions and the pareto frontier for the RS algorithm")
@@ -79,6 +93,12 @@ def main():
     elif args.algorithm == Algorithm.HGS_RECTANGLE_SPLITTING:
         from scripts.run_hgs_rs import run_hgs_rs
         run_hgs_rs(args)
+    elif args.algorithm == Algorithm.HGS_PENALTY:
+        from scripts.run_hgs_penalty import run_hgs_penalty
+        run_hgs_penalty(args)
+    elif args.algorithm == Algorithm.HGS_ADAPTIVE:
+        from scripts.run_hgs_adaptive import run_hgs_adaptive
+        run_hgs_adaptive(args)
     elif args.algorithm == Algorithm.HGS_SIMPLE:
         from scripts.run_hgs import run_simple
         run_simple(args)

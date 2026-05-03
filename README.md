@@ -32,11 +32,31 @@
 
 ### Установка
 
+Проект использует форк [PyVRP](https://github.com/ksenia274/PyVRP) с изменениями в C++ ядре, поэтому при установке требуется компилятор C++.
+
+#### Linux
+
 ```bash
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+# Системные зависимости (один раз)
+sudo apt install python3.12 python3.12-venv build-essential git
+
+# Создать окружение и установить всё
+python3.12 -m venv venv
+source venv/bin/activate
+pip install poetry-core meson ninja docblock
+pip install -r requirements.txt --no-build-isolation
 ```
+
+#### Windows
+
+Требуется [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022) с компонентом «Разработка классических приложений на C++».
+
+```bat
+python -m venv venv
+install_fork.bat
+```
+
+`install_fork.bat` активирует окружение MSVC и выполняет `pip install -r requirements.txt --no-build-isolation`.
 
 ---
 
@@ -59,6 +79,8 @@ git clone https://github.com/Stephic-Hardy/Fair_VRP_ala_Yandex
 | `hgs_simple` | HGS без fairness-постобработки |
 | `hgs_rebalance` | HGS + ребалансировка маршрутов (relocate/swap) для улучшения fairness |
 | `hgs_rs` | HGS + rectangle splitting — исследование фронта Парето по (distance, max\_duration) |
+| `hgs_penalty` | HGS с итеративными рестартами и штрафной матрицей расстояний |
+| `hgs_adaptive` | HGS + адаптивные веса (route\_balance) прямо в ILS через форк PyVRP |
 | `alns` | ALNS с fairness-штрафом в целевой функции |
 
 ---
@@ -68,14 +90,14 @@ git clone https://github.com/Stephic-Hardy/Fair_VRP_ala_Yandex
 #### Одиночный инстанс
 
 ```bash
-# Solomon
-python main.py --algorithm hgs_rebalance --instance R101
-
 # Yandex
 python main.py --algorithm hgs_rebalance --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+python main.py --algorithm hgs_penalty   --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+python main.py --algorithm hgs_adaptive  --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+python main.py --algorithm alns          --instance ../Fair_VRP_ala_Yandex/vrp_problems/0.json
 
-# ALNS
-python main.py --algorithm alns --instance R101
+# Solomon
+python main.py --algorithm hgs_rebalance --instance R101
 ```
 
 #### Бенчмарк (все инстансы → CSV)
@@ -116,16 +138,22 @@ python main.py visualise --csv results/fairness_benchmark.csv --output visualiza
 
 ```bash
 # HGS + fairness rebalancing
-python run_spb_hgs.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+python scripts/run_spb_hgs.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
 
 # Prize-Collecting режим (клиенты необязательны, приоритет по point_scores)
-python run_spb_hgs.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json --prizes
+python scripts/run_spb_hgs.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json --prizes
 
-# Генерация синтетического инстанса и сохранение
-python run_spb_hgs.py --points 100 --save-json my_problem.json
+# HGS + адаптивные веса
+python scripts/run_spb_hgs_adaptive.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+
+# HGS + штрафная матрица
+python scripts/run_spb_hgs_penalty.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
 
 # ALNS
-python run_spb_alns.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+python scripts/run_spb_alns.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
+
+# Генерация синтетического инстанса и сохранение
+python scripts/run_spb_hgs.py --points 100 --save-json my_problem.json
 ```
 
 Карта сохраняется в `visualization/map_results/` в формате HTML (Folium).
@@ -138,7 +166,7 @@ python run_spb_alns.py --load-json ../Fair_VRP_ala_Yandex/vrp_problems/0.json
 
 | Параметр | По умолчанию | Описание |
 |---|---|---|
-| `--algorithm` | — | `hgs_simple` / `hgs_rebalance` / `hgs_rs` / `alns` |
+| `--algorithm` | — | `hgs_simple` / `hgs_rebalance` / `hgs_rs` / `hgs_penalty` / `hgs_adaptive` / `alns` |
 | `--instance` | `R101` | Имя Solomon-инстанса или путь к `.json` |
 | `--time` | `30` | Лимит времени солвера (с) |
 | `--vehicles` | `25` | Число машин |

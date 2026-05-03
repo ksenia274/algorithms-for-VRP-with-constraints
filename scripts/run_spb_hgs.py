@@ -7,7 +7,7 @@ import sys
 
 from spb_utils import generate_instance, problem_to_instance_input
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE_COORDS = (60.00771529992149, 30.370180423873254)
 DISTRICT_NAME = "Kalininsky District, Saint Petersburg, Russia"

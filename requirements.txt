@@ -4,7 +4,12 @@ matplotlib
 seaborn
 networkx
 tqdm
-pyvrp
+# build tools for PyVRP fork (required before --no-build-isolation)
+poetry-core
+meson
+ninja
+docblock
+pyvrp @ git+https://github.com/ksenia274/PyVRP.git@main
 kagglehub
 alns
 folium
